@@ -1,0 +1,111 @@
+pub mod server;
+pub mod storage;
+
+use std::sync::OnceLock;
+
+use crate::provider::{OperationResult, Provider, ProviderMode};
+use crate::schema::Schema;
+
+static SERVER_SCHEMA: OnceLock<Schema> = OnceLock::new();
+
+fn server_schema() -> &'static Schema {
+    SERVER_SCHEMA.get_or_init(|| {
+        Schema::from_toml(include_str!("schemas/server.toml"))
+            .expect("built-in server schema is invalid")
+    })
+}
+
+static STORAGE_DATA_SCHEMA: OnceLock<Schema> = OnceLock::new();
+
+fn storage_data_schema() -> &'static Schema {
+    STORAGE_DATA_SCHEMA.get_or_init(|| {
+        Schema::from_toml(include_str!("schemas/storage_data.toml"))
+            .expect("built-in storage data schema is invalid")
+    })
+}
+
+pub struct Client {
+    pub(crate) http: reqwest::blocking::Client,
+    pub(crate) base_url: String,
+    pub(crate) token: String,
+}
+
+impl Client {
+    pub fn new(mode: ProviderMode) -> Result<Self, Box<dyn std::error::Error>> {
+        let token = match mode {
+            ProviderMode::Live => std::env::var("UPCLOUD_TOKEN")
+                .map_err(|_| "UPCLOUD_TOKEN environment variable not set")?,
+            ProviderMode::SchemaOnly => String::new(),
+        };
+
+        Ok(Self {
+            http: reqwest::blocking::Client::new(),
+            base_url: "https://api.upcloud.com".to_string(),
+            token,
+        })
+    }
+}
+
+impl Provider for Client {
+    fn name(&self) -> &str {
+        "upcloud"
+    }
+
+    fn resolve_data_source(
+        &self,
+        data_type: &str,
+        filters: serde_json::Value,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        match data_type {
+            "storage" => storage::resolve(self, filters),
+            other => Err(format!("unknown upcloud data source type: {other}").into()),
+        }
+    }
+
+    fn create_resource(
+        &self,
+        resource_type: &str,
+        properties: serde_json::Value,
+    ) -> Result<OperationResult, Box<dyn std::error::Error>> {
+        match resource_type {
+            "server" => server::create(self, properties),
+            other => Err(format!("unknown upcloud resource type: {other}").into()),
+        }
+    }
+
+    fn read_resource(
+        &self,
+        resource_type: &str,
+        outputs: &serde_json::Value,
+    ) -> Result<OperationResult, Box<dyn std::error::Error>> {
+        match resource_type {
+            "server" => server::read(self, outputs),
+            other => Err(format!("unknown upcloud resource type: {other}").into()),
+        }
+    }
+
+    fn delete_resource(
+        &self,
+        resource_type: &str,
+        outputs: &serde_json::Value,
+    ) -> Result<OperationResult, Box<dyn std::error::Error>> {
+        match resource_type {
+            "server" => server::delete(self, outputs),
+            other => Err(format!("unknown upcloud resource type: {other}").into()),
+        }
+    }
+
+    fn resource_schema(&self, resource_type: &str) -> Option<&Schema> {
+        match resource_type {
+            "server" => Some(server_schema()),
+            _ => None,
+        }
+    }
+
+    fn data_source_schema(&self, data_type: &str) -> Option<&Schema> {
+        match data_type {
+            "storage" => Some(storage_data_schema()),
+            _ => None,
+        }
+    }
+}
