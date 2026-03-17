@@ -265,13 +265,12 @@ pub(crate) fn print_data_changes(changes: &[state::DataChange]) {
                 new_value,
             } => {
                 if old_value.is_empty() {
-                    println!("  ~ {key}: (new) -> \"{new_value}\"");
+                    println!("  ~ data.{source}.{key}: (new) -> \"{new_value}\"");
                 } else if new_value.is_empty() {
-                    println!("  ~ {key}: \"{old_value}\" -> (removed)");
+                    println!("  ~ data.{source}.{key}: \"{old_value}\" -> (removed)");
                 } else {
-                    println!("  ~ {key}: \"{old_value}\" -> \"{new_value}\"");
+                    println!("  ~ data.{source}.{key}: \"{old_value}\" -> \"{new_value}\"");
                 }
-                let _ = source;
             }
             state::DataChange::FiltersChanged { source } => {
                 println!("  ~ data.{source}: filters changed");
