@@ -1,16 +1,16 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
 use crate::config;
 
 pub struct DependencyGraph {
-    edges: HashMap<String, HashSet<String>>, // resource -> depends on
+    edges: BTreeMap<String, BTreeSet<String>>, // resource -> depends on
 }
 
 impl DependencyGraph {
     pub fn build(
         resources: &HashMap<String, config::Resource>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut edges: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
         for (name, resource) in resources {
             edges.entry(name.clone()).or_default();
@@ -35,7 +35,7 @@ impl DependencyGraph {
     pub fn build_from_snapshots(
         snapshots: &HashMap<String, crate::state::ResourceSnapshot>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut edges: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
         for (name, snap) in snapshots {
             edges.entry(name.clone()).or_default();
@@ -104,7 +104,9 @@ impl DependencyGraph {
                     let deg = in_degree.get_mut(dependent.as_str()).unwrap();
                     *deg -= 1;
                     if *deg == 0 {
-                        queue.push_back(dependent.clone());
+                        // Insert in sorted position to maintain deterministic ordering
+                        let insert_pos = queue.iter().position(|x| x > dependent).unwrap_or(queue.len());
+                        queue.insert(insert_pos, dependent.clone());
                     }
                 }
             }
