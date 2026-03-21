@@ -7,31 +7,6 @@ pub struct DependencyGraph {
 }
 
 impl DependencyGraph {
-    pub fn build(
-        resources: &HashMap<String, config::Resource>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-
-        for (name, resource) in resources {
-            edges.entry(name.clone()).or_default();
-            if let Some(ref props) = resource.properties {
-                let text = props.to_string();
-                let refs = config::extract_resource_refs(&text);
-                for (dep_name, _field) in refs {
-                    if !resources.contains_key(&dep_name) {
-                        return Err(format!(
-                            "resource '{name}' references unknown resource '{dep_name}'"
-                        )
-                        .into());
-                    }
-                    edges.entry(name.clone()).or_default().insert(dep_name);
-                }
-            }
-        }
-
-        Ok(Self { edges })
-    }
-
     pub fn build_from_snapshots(
         snapshots: &HashMap<String, crate::state::ResourceSnapshot>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
