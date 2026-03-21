@@ -105,7 +105,10 @@ impl DependencyGraph {
                     *deg -= 1;
                     if *deg == 0 {
                         // Insert in sorted position to maintain deterministic ordering
-                        let insert_pos = queue.iter().position(|x| x > dependent).unwrap_or(queue.len());
+                        let insert_pos = queue
+                            .iter()
+                            .position(|x| x > dependent)
+                            .unwrap_or(queue.len());
                         queue.insert(insert_pos, dependent.clone());
                     }
                 }

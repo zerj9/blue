@@ -71,9 +71,10 @@ impl ProviderRegistry {
 
     fn get_or_init(&mut self, name: &str) -> Result<&dyn Provider, Box<dyn std::error::Error>> {
         if !self.providers.contains_key(name) {
-            let factory = self.factories.get(name).ok_or_else(|| {
-                format!("unknown provider '{name}'")
-            })?;
+            let factory = self
+                .factories
+                .get(name)
+                .ok_or_else(|| format!("unknown provider '{name}'"))?;
             let provider = factory(self.mode)?;
             self.providers.insert(name.to_string(), provider);
         }
@@ -87,12 +88,13 @@ impl ProviderRegistry {
         let mut vars = HashMap::new();
         for (name, source) in sources {
             let (provider_name, data_type) = source.provider_and_type()?;
-            let provider = self.get_or_init(provider_name).map_err(|e| {
-                format!("data.{name}: {e}")
-            })?;
-            let filters = serde_json::to_value(&source.filters)
+            let provider = self
+                .get_or_init(provider_name)
                 .map_err(|e| format!("data.{name}: {e}"))?;
-            let raw_value = provider.resolve_data_source(data_type, filters)
+            let filters =
+                serde_json::to_value(&source.filters).map_err(|e| format!("data.{name}: {e}"))?;
+            let raw_value = provider
+                .resolve_data_source(data_type, filters)
                 .map_err(|e| format!("data.{name}: {e}"))?;
             let schema = provider.data_source_schema(data_type);
             let extracted = match schema {
@@ -166,7 +168,9 @@ impl ProviderRegistry {
         full_type: &str,
     ) -> Result<Option<&Schema>, Box<dyn std::error::Error>> {
         let (provider_name, resource_type) = config::split_provider_type(full_type)?;
-        let provider = self.providers.get(provider_name)
+        let provider = self
+            .providers
+            .get(provider_name)
             .ok_or_else(|| format!("provider '{provider_name}' not initialized"))?;
         Ok(provider.resource_schema(resource_type))
     }
@@ -176,7 +180,9 @@ impl ProviderRegistry {
         full_type: &str,
     ) -> Result<Option<&Schema>, Box<dyn std::error::Error>> {
         let (provider_name, data_type) = config::split_provider_type(full_type)?;
-        let provider = self.providers.get(provider_name)
+        let provider = self
+            .providers
+            .get(provider_name)
             .ok_or_else(|| format!("provider '{provider_name}' not initialized"))?;
         Ok(provider.data_source_schema(data_type))
     }
@@ -188,10 +194,12 @@ impl ProviderRegistry {
         let mut errors = Vec::new();
 
         for (name, resource) in resources {
-            let (provider_name, resource_type) = resource.provider_and_type()
+            let (provider_name, resource_type) = resource
+                .provider_and_type()
                 .map_err(|e| format!("resources.{name}: {e}"))?;
 
-            let provider = self.get_or_init(provider_name)
+            let provider = self
+                .get_or_init(provider_name)
                 .map_err(|e| format!("resources.{name}: {e}"))?;
 
             let schema = match provider.resource_schema(resource_type) {
@@ -205,14 +213,20 @@ impl ProviderRegistry {
 
             match &resource.properties {
                 Some(props) => errors.extend(schema.validate(name, props)),
-                None => errors.extend(schema.validate(name, &toml::Value::Table(Default::default()))),
+                None => {
+                    errors.extend(schema.validate(name, &toml::Value::Table(Default::default())))
+                }
             }
         }
 
         if errors.is_empty() {
             Ok(())
         } else {
-            let msg = errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n");
+            let msg = errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
             Err(msg.into())
         }
     }

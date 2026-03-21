@@ -72,7 +72,9 @@ pub fn extract_data_sources(
     let first: FirstPass = toml::from_str(raw)?;
     // Validate all type formats early
     for (name, source) in &first.data {
-        source.provider_and_type().map_err(|e| format!("data.{name}: {e}"))?;
+        source
+            .provider_and_type()
+            .map_err(|e| format!("data.{name}: {e}"))?;
     }
     Ok(first.data)
 }
@@ -203,9 +205,11 @@ pub fn resolve_resource_refs(
         let key = after_open[..end].trim();
         if let Some(suffix) = key.strip_prefix("resources.") {
             if let Some((name, field)) = suffix.split_once('.') {
-                let outputs = resource_outputs.get(name)
+                let outputs = resource_outputs
+                    .get(name)
                     .ok_or_else(|| format!("unresolved resource reference: {key}"))?;
-                let value = outputs.get(field)
+                let value = outputs
+                    .get(field)
                     .ok_or_else(|| format!("resource '{name}' has no output '{field}'"))?;
                 match value.as_str() {
                     Some(s) => result.push_str(s),

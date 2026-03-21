@@ -41,18 +41,46 @@ pub struct ResourceSnapshot {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum PropertyChange {
-    Added { field: String, new_value: serde_json::Value },
-    Removed { field: String, old_value: serde_json::Value },
-    Modified { field: String, old_value: serde_json::Value, new_value: serde_json::Value, force_new: bool },
+    Added {
+        field: String,
+        new_value: serde_json::Value,
+    },
+    Removed {
+        field: String,
+        old_value: serde_json::Value,
+    },
+    Modified {
+        field: String,
+        old_value: serde_json::Value,
+        new_value: serde_json::Value,
+        force_new: bool,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ResourceChange {
-    Create { name: String, resource_type: String, properties: serde_json::Value },
-    Delete { name: String, resource_type: String },
-    Update { name: String, resource_type: String, changes: Vec<PropertyChange> },
-    Replace { name: String, resource_type: String, changes: Vec<PropertyChange> },
-    Unchanged { name: String },
+    Create {
+        name: String,
+        resource_type: String,
+        properties: serde_json::Value,
+    },
+    Delete {
+        name: String,
+        resource_type: String,
+    },
+    Update {
+        name: String,
+        resource_type: String,
+        changes: Vec<PropertyChange>,
+    },
+    Replace {
+        name: String,
+        resource_type: String,
+        changes: Vec<PropertyChange>,
+    },
+    Unchanged {
+        name: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -133,9 +161,7 @@ pub fn toml_to_json(value: &toml::Value) -> serde_json::Value {
         toml::Value::Integer(n) => serde_json::json!(*n),
         toml::Value::Float(f) => serde_json::json!(*f),
         toml::Value::Boolean(b) => serde_json::Value::Bool(*b),
-        toml::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(toml_to_json).collect())
-        }
+        toml::Value::Array(arr) => serde_json::Value::Array(arr.iter().map(toml_to_json).collect()),
         toml::Value::Table(table) => {
             let mut map = serde_json::Map::new();
             for (k, v) in table {
@@ -168,7 +194,10 @@ pub fn flatten_json(
     }
 }
 
-pub fn save_changeset(changeset: &Changeset, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn save_changeset(
+    changeset: &Changeset,
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let json = serde_json::to_string_pretty(changeset)?;
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, &json)?;
@@ -368,7 +397,8 @@ pub fn diff_resources(
             Some(old_snap) => {
                 if old_snap.resource_type != new_snap.resource_type {
                     let schema = registry.resource_schema(&new_snap.resource_type)?;
-                    let prop_changes = diff_properties(&old_snap.properties, &new_snap.properties, schema);
+                    let prop_changes =
+                        diff_properties(&old_snap.properties, &new_snap.properties, schema);
                     changes.push(ResourceChange::Replace {
                         name: name.clone(),
                         resource_type: new_snap.resource_type.clone(),
@@ -376,11 +406,20 @@ pub fn diff_resources(
                     });
                 } else {
                     let schema = registry.resource_schema(&new_snap.resource_type)?;
-                    let prop_changes = diff_properties(&old_snap.properties, &new_snap.properties, schema);
+                    let prop_changes =
+                        diff_properties(&old_snap.properties, &new_snap.properties, schema);
                     if prop_changes.is_empty() {
                         changes.push(ResourceChange::Unchanged { name: name.clone() });
                     } else {
-                        let has_force_new = prop_changes.iter().any(|c| matches!(c, PropertyChange::Modified { force_new: true, .. }));
+                        let has_force_new = prop_changes.iter().any(|c| {
+                            matches!(
+                                c,
+                                PropertyChange::Modified {
+                                    force_new: true,
+                                    ..
+                                }
+                            )
+                        });
                         if has_force_new {
                             changes.push(ResourceChange::Replace {
                                 name: name.clone(),

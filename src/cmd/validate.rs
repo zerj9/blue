@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use clap::Args;
 
-use crate::{config, provider, providers, schema};
 use super::build_cli_vars;
+use crate::{config, provider, providers, schema};
 
 #[derive(Args)]
 pub struct ValidateArgs {

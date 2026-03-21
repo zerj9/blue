@@ -99,7 +99,13 @@ pub fn create(
 
     if let Some(metadata) = properties.get("metadata") {
         let val = match metadata {
-            serde_json::Value::Bool(b) => if *b { "yes" } else { "no" },
+            serde_json::Value::Bool(b) => {
+                if *b {
+                    "yes"
+                } else {
+                    "no"
+                }
+            }
             serde_json::Value::String(s) if s == "true" => "yes",
             serde_json::Value::String(s) if s == "false" => "no",
             _ => "no",
@@ -224,7 +230,11 @@ pub fn delete(
             return Err(format!("timed out waiting for server {uuid} to stop").into());
         }
 
-        let resp = client.http.get(&server_url).bearer_auth(&client.token).send()?;
+        let resp = client
+            .http
+            .get(&server_url)
+            .bearer_auth(&client.token)
+            .send()?;
         if !resp.status().is_success() {
             continue;
         }
@@ -237,7 +247,9 @@ pub fn delete(
 
         match server_state {
             "stopped" => break,
-            "error" => return Err(format!("server {uuid} entered error state while stopping").into()),
+            "error" => {
+                return Err(format!("server {uuid} entered error state while stopping").into());
+            }
             _ => {}
         }
     }

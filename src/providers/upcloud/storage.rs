@@ -64,11 +64,7 @@ pub fn resolve(
         .collect();
 
     match matched.len() {
-        0 => Err(format!(
-            "no storage matched filters: {:?}",
-            filter_map
-        )
-        .into()),
+        0 => Err(format!("no storage matched filters: {:?}", filter_map).into()),
         1 => Ok(matched[0].clone()),
         n => {
             let mut msg = format!("{n} storages matched, expected exactly 1\n");
