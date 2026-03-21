@@ -176,10 +176,10 @@ pub fn extract_resource_refs(text: &str) -> Vec<(String, String)> {
         let after_open = &rest[start + 2..];
         if let Some(end) = after_open.find("}}") {
             let key = after_open[..end].trim();
-            if let Some(suffix) = key.strip_prefix("resources.") {
-                if let Some((name, field)) = suffix.split_once('.') {
-                    refs.push((name.to_string(), field.to_string()));
-                }
+            if let Some(suffix) = key.strip_prefix("resources.")
+                && let Some((name, field)) = suffix.split_once('.')
+            {
+                refs.push((name.to_string(), field.to_string()));
             }
             rest = &after_open[end + 2..];
         } else {

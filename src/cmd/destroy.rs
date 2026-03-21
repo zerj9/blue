@@ -67,13 +67,12 @@ pub fn run(args: &DestroyArgs) {
 
     // Delete in reverse dependency order
     for name in order.iter().rev() {
-        if old_state.resources.contains_key(name) {
-            if let Err(e) =
+        if old_state.resources.contains_key(name)
+            && let Err(e) =
                 deploy::delete_resource(name, &mut old_state, &mut registry, &args.state)
-            {
-                eprintln!("Error: {e}");
-                std::process::exit(1);
-            }
+        {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
         }
     }
 

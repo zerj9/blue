@@ -1,0 +1,40 @@
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Unlicense",
+    "Zlib",
+]
+
+deny = [
+    "GPL-3.0",
+    "AGPL-3.0",
+]
+
+[licenses.private]
+# Allow exceptions for private/corporate licenses if needed
+# ignore = true
+
+[bans]
+# Add any specific crate bans here
+# Example:
+# multiple-versions = "deny"
+# deny = [{ name = "old-crate", version = "=1.0.0" }]
+
+[sources]
+# Only allow crates from crates.io by default
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+# Security advisory settings
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+vulnerability = "deny"
+unmaintained = "warn"
+notice = "warn"
+ignore = []

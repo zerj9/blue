@@ -54,10 +54,10 @@ pub fn execute(
     // Also delete resources that aren't in the new order (removed from config)
     let order_set: std::collections::HashSet<&str> = order.iter().map(|s| s.as_str()).collect();
     for change in &changeset.resource_changes {
-        if let state::ResourceChange::Delete { name, .. } = change {
-            if !order_set.contains(name.as_str()) {
-                delete_resource(name, state, registry, state_path)?;
-            }
+        if let state::ResourceChange::Delete { name, .. } = change
+            && !order_set.contains(name.as_str())
+        {
+            delete_resource(name, state, registry, state_path)?;
         }
     }
 
