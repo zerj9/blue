@@ -65,8 +65,7 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install cargo-deny
-        run: cargo install cargo-deny
-
-      - name: Check licenses
-        run: cargo deny check licenses
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
