@@ -63,28 +63,26 @@ pub fn execute(
 
     // Phase 2: Creates (forward dependency order)
     for name in &order {
-        if let Some(change) = changes_by_name.get(name.as_str()) {
-            match change {
-                state::ResourceChange::Create {
-                    name,
-                    resource_type,
-                    ..
-                }
-                | state::ResourceChange::Replace {
-                    name,
-                    resource_type,
-                    ..
-                }
-                | state::ResourceChange::Update {
-                    name,
-                    resource_type,
-                    ..
-                } => {
-                    let props = &changeset.resource_snapshots[name].properties;
-                    create_resource(name, resource_type, props, state, registry, state_path)?;
-                }
-                _ => {}
+        if let Some(
+            state::ResourceChange::Create {
+                name,
+                resource_type,
+                ..
             }
+            | state::ResourceChange::Replace {
+                name,
+                resource_type,
+                ..
+            }
+            | state::ResourceChange::Update {
+                name,
+                resource_type,
+                ..
+            },
+        ) = changes_by_name.get(name.as_str())
+        {
+            let props = &changeset.resource_snapshots[name].properties;
+            create_resource(name, resource_type, props, state, registry, state_path)?;
         }
     }
 
