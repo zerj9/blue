@@ -256,16 +256,17 @@ impl Schema {
                             got: toml_type_description(value),
                         });
                     }
-                    if field.field_type == FieldType::Array && !field.items.is_empty() {
-                        if let toml::Value::Array(elements) = value {
-                            validate_array_elements(
-                                resource_name,
-                                path,
-                                elements,
-                                &field.items,
-                                &mut errors,
-                            );
-                        }
+                    if field.field_type == FieldType::Array
+                        && !field.items.is_empty()
+                        && let toml::Value::Array(elements) = value
+                    {
+                        validate_array_elements(
+                            resource_name,
+                            path,
+                            elements,
+                            &field.items,
+                            &mut errors,
+                        );
                     }
                 }
             }
@@ -313,17 +314,18 @@ impl Schema {
                                 got: toml_type_description(value),
                             });
                         }
-                        if field_def.field_type == FieldType::Array && !field_def.items.is_empty() {
-                            if let toml::Value::Array(elements) = value {
-                                validate_array_elements_with_refs(
-                                    resource_name,
-                                    path,
-                                    elements,
-                                    &field_def.items,
-                                    ctx,
-                                    &mut errors,
-                                );
-                            }
+                        if field_def.field_type == FieldType::Array
+                            && !field_def.items.is_empty()
+                            && let toml::Value::Array(elements) = value
+                        {
+                            validate_array_elements_with_refs(
+                                resource_name,
+                                path,
+                                elements,
+                                &field_def.items,
+                                ctx,
+                                &mut errors,
+                            );
                         }
                     }
                     RefKind::DataRef { source, field } => match ctx.data_schemas.get(&source) {
@@ -664,21 +666,21 @@ fn classify_value(value: &toml::Value) -> RefKind {
         if trimmed.starts_with("{{") && trimmed.ends_with("}}") {
             let inner = trimmed[2..trimmed.len() - 2].trim();
             if !inner.contains("{{") && !inner.contains("}}") {
-                if let Some(suffix) = inner.strip_prefix("data.") {
-                    if let Some((source, field)) = suffix.split_once('.') {
-                        return RefKind::DataRef {
-                            source: source.to_string(),
-                            field: field.to_string(),
-                        };
-                    }
+                if let Some(suffix) = inner.strip_prefix("data.")
+                    && let Some((source, field)) = suffix.split_once('.')
+                {
+                    return RefKind::DataRef {
+                        source: source.to_string(),
+                        field: field.to_string(),
+                    };
                 }
-                if let Some(suffix) = inner.strip_prefix("resources.") {
-                    if let Some((resource, field)) = suffix.split_once('.') {
-                        return RefKind::ResourceRef {
-                            resource: resource.to_string(),
-                            field: field.to_string(),
-                        };
-                    }
+                if let Some(suffix) = inner.strip_prefix("resources.")
+                    && let Some((resource, field)) = suffix.split_once('.')
+                {
+                    return RefKind::ResourceRef {
+                        resource: resource.to_string(),
+                        field: field.to_string(),
+                    };
                 }
             }
         }
@@ -751,10 +753,10 @@ fn resolve_output_path<'a>(
                 resolve_output_path(rest, item, &indexed_path, out);
             }
         }
-    } else if let serde_json::Value::Object(map) = value {
-        if let Some(child) = map.get(segment) {
-            resolve_output_path(rest, child, current_path, out);
-        }
+    } else if let serde_json::Value::Object(map) = value
+        && let Some(child) = map.get(segment)
+    {
+        resolve_output_path(rest, child, current_path, out);
     }
 }
 

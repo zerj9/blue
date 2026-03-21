@@ -61,11 +61,11 @@ pub(crate) fn resolve_config(
         }
     };
 
-    if !config.resources.is_empty() {
-        if let Err(e) = registry.validate_resources(&config.resources) {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        }
+    if !config.resources.is_empty()
+        && let Err(e) = registry.validate_resources(&config.resources)
+    {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
     }
 
     ResolvedConfig {

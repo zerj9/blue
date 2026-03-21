@@ -17,8 +17,6 @@ pub enum OperationResult {
 }
 
 pub trait Provider {
-    fn name(&self) -> &str;
-
     fn resolve_data_source(
         &self,
         data_type: &str,
@@ -136,15 +134,6 @@ impl ProviderRegistry {
         let (provider_name, resource_type) = config::split_provider_type(full_type)?;
         let provider = self.get_or_init(provider_name)?;
         provider.delete_resource(resource_type, outputs)
-    }
-
-    pub fn data_source_schema(
-        &mut self,
-        full_type: &str,
-    ) -> Result<Option<&Schema>, Box<dyn std::error::Error>> {
-        let (provider_name, data_type) = config::split_provider_type(full_type)?;
-        let provider = self.get_or_init(provider_name)?;
-        Ok(provider.data_source_schema(data_type))
     }
 
     pub fn resource_schema(

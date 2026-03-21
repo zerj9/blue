@@ -54,37 +54,35 @@ pub fn execute(
     // Also delete resources that aren't in the new order (removed from config)
     let order_set: std::collections::HashSet<&str> = order.iter().map(|s| s.as_str()).collect();
     for change in &changeset.resource_changes {
-        if let state::ResourceChange::Delete { name, .. } = change {
-            if !order_set.contains(name.as_str()) {
-                delete_resource(name, state, registry, state_path)?;
-            }
+        if let state::ResourceChange::Delete { name, .. } = change
+            && !order_set.contains(name.as_str())
+        {
+            delete_resource(name, state, registry, state_path)?;
         }
     }
 
     // Phase 2: Creates (forward dependency order)
     for name in &order {
-        if let Some(change) = changes_by_name.get(name.as_str()) {
-            match change {
-                state::ResourceChange::Create {
-                    name,
-                    resource_type,
-                    ..
-                }
-                | state::ResourceChange::Replace {
-                    name,
-                    resource_type,
-                    ..
-                }
-                | state::ResourceChange::Update {
-                    name,
-                    resource_type,
-                    ..
-                } => {
-                    let props = &changeset.resource_snapshots[name].properties;
-                    create_resource(name, resource_type, props, state, registry, state_path)?;
-                }
-                _ => {}
+        if let Some(
+            state::ResourceChange::Create {
+                name,
+                resource_type,
+                ..
             }
+            | state::ResourceChange::Replace {
+                name,
+                resource_type,
+                ..
+            }
+            | state::ResourceChange::Update {
+                name,
+                resource_type,
+                ..
+            },
+        ) = changes_by_name.get(name.as_str())
+        {
+            let props = &changeset.resource_snapshots[name].properties;
+            create_resource(name, resource_type, props, state, registry, state_path)?;
         }
     }
 

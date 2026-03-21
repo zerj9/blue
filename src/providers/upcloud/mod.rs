@@ -47,10 +47,6 @@ impl Client {
 }
 
 impl Provider for Client {
-    fn name(&self) -> &str {
-        "upcloud"
-    }
-
     fn resolve_data_source(
         &self,
         data_type: &str,

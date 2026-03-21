@@ -354,7 +354,7 @@ fn diff_properties(
                 });
             }
             Some(old_value) if old_value != new_value => {
-                let force_new = schema.map_or(false, |s| s.is_force_new(field));
+                let force_new = schema.is_some_and(|s| s.is_force_new(field));
                 changes.push(PropertyChange::Modified {
                     field: field.clone(),
                     old_value: old_value.clone(),
