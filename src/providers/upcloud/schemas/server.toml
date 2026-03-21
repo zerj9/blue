@@ -1,0 +1,91 @@
+[[fields]]
+path = "hostname"
+type = "string"
+required = true
+
+[[fields]]
+path = "zone"
+type = "string"
+required = true
+force_new = true
+
+[[fields]]
+path = "plan"
+type = "string"
+required = true
+
+[[fields]]
+path = "metadata"
+type = "boolean"
+
+[[fields]]
+path = "interfaces"
+type = "array"
+required = true
+force_new = true
+
+[[fields.items]]
+path = "type"
+type = "string"
+required = true
+
+[[fields.items]]
+path = "ip_family"
+type = "string"
+
+[[fields.items]]
+path = "network"
+type = "string"
+
+[[fields]]
+path = "storage_devices"
+type = "array"
+required = true
+force_new = true
+
+[[fields.items]]
+path = "action"
+type = "string"
+required = true
+
+[[fields.items]]
+path = "storage"
+type = "string"
+
+[[fields.items]]
+path = "size"
+type = "integer"
+required = true
+
+[[fields.items]]
+path = "title"
+type = "string"
+
+[[fields.items]]
+path = "tier"
+type = "string"
+
+[[fields]]
+path = "title"
+type = "string"
+required = true
+
+[[outputs]]
+path = "uuid"
+type = "string"
+
+[[outputs]]
+path = "state"
+type = "string"
+
+[[outputs]]
+path = "hostname"
+type = "string"
+
+[[outputs]]
+path = "zone"
+type = "string"
+
+[[outputs]]
+path = "plan"
+type = "string"

@@ -1,0 +1,43 @@
+[[outputs]]
+path = "uuid"
+type = "string"
+
+[[outputs]]
+path = "title"
+type = "string"
+
+[[outputs]]
+path = "access"
+type = "string"
+
+[[outputs]]
+path = "type"
+type = "string"
+
+[[outputs]]
+path = "state"
+type = "string"
+
+[[outputs]]
+path = "size"
+type = "integer"
+
+[[outputs]]
+path = "zone"
+type = "string"
+
+[[outputs]]
+path = "encrypted"
+type = "string"
+
+[[outputs]]
+path = "license"
+type = "integer"
+
+[[outputs]]
+path = "tier"
+type = "string"
+
+[[outputs]]
+path = "template_type"
+type = "string"
