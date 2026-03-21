@@ -256,7 +256,8 @@ impl Schema {
                             got: toml_type_description(value),
                         });
                     }
-                    if field.field_type == FieldType::Array && !field.items.is_empty()
+                    if field.field_type == FieldType::Array
+                        && !field.items.is_empty()
                         && let toml::Value::Array(elements) = value
                     {
                         validate_array_elements(
@@ -313,7 +314,8 @@ impl Schema {
                                 got: toml_type_description(value),
                             });
                         }
-                        if field_def.field_type == FieldType::Array && !field_def.items.is_empty()
+                        if field_def.field_type == FieldType::Array
+                            && !field_def.items.is_empty()
                             && let toml::Value::Array(elements) = value
                         {
                             validate_array_elements_with_refs(
