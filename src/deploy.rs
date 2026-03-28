@@ -38,6 +38,50 @@ fn save_resource(
     state::save_ref(state, state_path)
 }
 
+/// Resolve `{{...}}` references in properties using outputs from ready resources.
+fn resolve_properties(
+    properties: &serde_json::Value,
+    state: &State,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let mut output_reg = OutputRegistry::new();
+    for (n, snap) in &state.resources {
+        if snap.status == ResourceStatus::Ready {
+            if let Some(obj) = snap.outputs.as_object() {
+                for (k, v) in obj {
+                    output_reg.insert("resources", n, k, v.clone());
+                }
+            }
+        }
+    }
+
+    let props_str = properties.to_string();
+    let resolved_str = Ref::resolve_all(&props_str, &output_reg)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+    Ok(serde_json::from_str(&resolved_str)?)
+}
+
+/// Apply property changes to produce new properties.
+fn apply_property_changes(
+    base: &serde_json::Value,
+    changes: &[PropertyChange],
+) -> serde_json::Value {
+    let mut result = base.clone();
+    for change in changes {
+        if let Some(obj) = result.as_object_mut() {
+            match change {
+                PropertyChange::Added { field, new_value }
+                | PropertyChange::Modified { field, new_value, .. } => {
+                    obj.insert(field.clone(), new_value.clone());
+                }
+                PropertyChange::Removed { field, .. } => {
+                    obj.remove(field);
+                }
+            }
+        }
+    }
+    result
+}
+
 pub fn execute(
     changeset: &state::Changeset,
     state: &mut State,
@@ -139,22 +183,7 @@ fn create_resource(
     registry: &mut ProviderRegistry,
     state_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Build output registry from ready resources for ref resolution
-    let mut output_reg = OutputRegistry::new();
-    for (n, snap) in &state.resources {
-        if snap.status == ResourceStatus::Ready {
-            if let Some(obj) = snap.outputs.as_object() {
-                for (k, v) in obj {
-                    output_reg.insert("resources", n, k, v.clone());
-                }
-            }
-        }
-    }
-
-    let props_str = properties.to_string();
-    let resolved_str = Ref::resolve_all(&props_str, &output_reg)
-        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-    let resolved_props: serde_json::Value = serde_json::from_str(&resolved_str)?;
+    let resolved_props = resolve_properties(properties, state)?;
 
     println!("Creating {name} ({resource_type})...");
 
@@ -320,54 +349,11 @@ fn update_resource(
     // Check if this update requires server stoppage
     let requires_stop = requires_stop_for_update(resource_type, property_changes, registry)?;
     
-    // Get the current resource snapshot and clone what we need
     let old_snapshot = state.resources.get(name)
         .ok_or_else(|| format!("Resource {name} not found in state"))?;
     let old_outputs = old_snapshot.outputs.clone();
-    let old_properties = old_snapshot.properties.clone();
-    
-    // Apply property changes to create new properties
-    let mut new_properties = old_properties.clone();
-    
-    for change in property_changes {
-        match change {
-            PropertyChange::Added { field, new_value } => {
-                // Add new field
-                if let Some(obj) = new_properties.as_object_mut() {
-                    obj.insert(field.clone(), new_value.clone());
-                }
-            }
-            PropertyChange::Removed { field, .. } => {
-                // Remove field
-                if let Some(obj) = new_properties.as_object_mut() {
-                    obj.remove(field);
-                }
-            }
-            PropertyChange::Modified { field, new_value, .. } => {
-                // Update field
-                if let Some(obj) = new_properties.as_object_mut() {
-                    obj.insert(field.clone(), new_value.clone());
-                }
-            }
-        }
-    }
-
-    // Build output registry from ready resources for ref resolution
-    let mut output_reg = OutputRegistry::new();
-    for (n, snap) in state.resources.iter() {
-        if snap.status == ResourceStatus::Ready {
-            if let Some(obj) = snap.outputs.as_object() {
-                for (k, v) in obj {
-                    output_reg.insert("resources", n, k, v.clone());
-                }
-            }
-        }
-    }
-
-    let props_str = new_properties.to_string();
-    let resolved_str = Ref::resolve_all(&props_str, &output_reg)
-        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-    let resolved_props: serde_json::Value = serde_json::from_str(&resolved_str)?;
+    let new_properties = apply_property_changes(&old_snapshot.properties, property_changes);
+    let resolved_props = resolve_properties(&new_properties, state)?;
 
     if requires_stop {
         println!("Updating {name} ({resource_type}) - stop required...");
