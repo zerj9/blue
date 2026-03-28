@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
 
@@ -40,6 +40,15 @@ pub fn run(args: &ValidateArgs) {
         }
     };
 
+    // Validate data source hooks
+    let file_path = args.file.parent().unwrap_or_else(|| Path::new(""));
+    for (name, source) in &data_sources {
+        if let Err(e) = config::validate_hooks(&source.hooks, file_path.to_str().unwrap_or("."), false) {
+            eprintln!("Error: data.{name}: {e}");
+            std::process::exit(1);
+        }
+    }
+
     // Load config deferring both data and resource references
     let cli_vars = build_cli_vars(&args.var, args.var_file.as_deref());
     let config = match config::load_for_validation(&raw, &cli_vars) {
@@ -49,6 +58,14 @@ pub fn run(args: &ValidateArgs) {
             std::process::exit(1);
         }
     };
+
+    // Validate resource hooks
+    for (name, resource) in &config.resources {
+        if let Err(e) = config::validate_hooks(&resource.hooks, file_path.to_str().unwrap_or("."), true) {
+            eprintln!("Error: resources.{name}: {e}");
+            std::process::exit(1);
+        }
+    }
 
     let mut registry = providers::build_registry(provider::ProviderMode::SchemaOnly);
 

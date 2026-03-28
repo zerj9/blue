@@ -2,6 +2,7 @@ mod cmd;
 mod config;
 mod deploy;
 mod graph;
+mod hooks;
 mod provider;
 mod providers;
 mod schema;

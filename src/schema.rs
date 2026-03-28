@@ -30,6 +30,7 @@ pub struct FieldDef {
     pub field_type: FieldType,
     pub required: bool,
     pub force_new: bool,
+    pub requires_stop: bool,
     pub items: Vec<FieldDef>,
 }
 
@@ -190,6 +191,8 @@ struct RawFieldDef {
     #[serde(default)]
     force_new: bool,
     #[serde(default)]
+    requires_stop: bool,
+    #[serde(default)]
     items: Vec<RawFieldDef>,
 }
 
@@ -221,6 +224,10 @@ impl Schema {
 
     pub fn is_force_new(&self, path: &str) -> bool {
         self.fields.iter().any(|f| f.path == path && f.force_new)
+    }
+
+    pub fn requires_stop(&self, path: &str) -> bool {
+        self.fields.iter().any(|f| f.path == path && f.requires_stop)
     }
 
     pub fn validate(&self, resource_name: &str, properties: &toml::Value) -> Vec<ValidationError> {
@@ -610,6 +617,7 @@ fn convert_field(raw: RawFieldDef) -> FieldDef {
         field_type: raw.field_type,
         required: raw.required,
         force_new: raw.force_new,
+        requires_stop: raw.requires_stop,
         items: raw.items.into_iter().map(convert_field).collect(),
     }
 }
@@ -717,7 +725,7 @@ fn toml_type_description(value: &toml::Value) -> String {
 pub fn extract_outputs(
     value: &serde_json::Value,
     outputs: &[OutputDef],
-) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
     let mut result = HashMap::new();
     for output in outputs {
         let segments: Vec<&str> = output.path.split('.').collect();
@@ -725,7 +733,7 @@ pub fn extract_outputs(
         resolve_output_path(&segments, value, &output.path, &mut leaves);
         for (key, leaf) in leaves {
             if !leaf.is_null() && json_type_matches(&output.output_type, leaf) {
-                result.insert(key, json_value_to_string(leaf));
+                result.insert(key.clone(), leaf.clone());
             }
         }
     }
@@ -772,12 +780,12 @@ fn json_type_matches(expected: &FieldType, value: &serde_json::Value) -> bool {
     }
 }
 
-fn json_value_to_string(value: &serde_json::Value) -> String {
+pub fn json_value_to_string(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Null => String::new(),
-        other => other.to_string(),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => value.to_string(),
     }
 }

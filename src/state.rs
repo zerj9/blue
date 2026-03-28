@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{config, config::DataSource, provider::ProviderRegistry};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct State {
     pub version: u64,
     pub serial: u64,
@@ -18,7 +18,7 @@ pub struct DataSnapshot {
     #[serde(rename = "type")]
     pub source_type: String,
     pub filters: HashMap<String, String>,
-    pub values: HashMap<String, String>,
+    pub values: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -28,6 +28,10 @@ pub enum ResourceStatus {
     Ready,
     Failed,
     Deleting,
+    Stopping,
+    Stopped,
+    Updating,
+    Starting,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -90,8 +94,8 @@ pub enum DataChange {
     Changed {
         source: String,
         key: String,
-        old_value: String,
-        new_value: String,
+        old_value: serde_json::Value,
+        new_value: serde_json::Value,
     },
     FiltersChanged {
         source: String,
@@ -220,12 +224,12 @@ pub fn load_changeset(path: &Path) -> Result<Changeset, Box<dyn std::error::Erro
 
 pub fn snapshot_data(
     sources: &HashMap<String, DataSource>,
-    resolved_vars: &HashMap<String, String>,
+    resolved_vars: &HashMap<String, serde_json::Value>,
 ) -> HashMap<String, DataSnapshot> {
     let mut snapshots = HashMap::new();
     for (name, source) in sources {
         let prefix = format!("data.{name}.");
-        let values: HashMap<String, String> = resolved_vars
+        let values: HashMap<String, serde_json::Value> = resolved_vars
             .iter()
             .filter(|(k, _)| k.starts_with(&prefix))
             .map(|(k, v)| (k[prefix.len()..].to_string(), v.clone()))
@@ -241,6 +245,95 @@ pub fn snapshot_data(
         );
     }
     snapshots
+}
+
+/// Execute safe hooks during planning and return hook outputs
+pub async fn execute_plan_hooks(
+    hook_registry: &crate::config::HookRegistry,
+    state: &State,
+) -> HashMap<String, serde_json::Value> {
+    use crate::hooks::{HookContext, execute_hook_with_validation};
+    use std::time::Duration;
+
+    let mut plan_outputs = HashMap::new();
+
+    // Execute data source hooks
+    for (data_name, hooks) in &hook_registry.data_hooks {
+        for hook in hooks {
+            match hook.event.as_str() {
+                // Safe to run during plan
+                "before_read" | "after_read" => {
+                    let context =
+                        HookContext::new(state.clone(), "data".to_string(), data_name.to_string());
+
+                    match execute_hook_with_validation(hook, context, Duration::from_secs(10)).await
+                    {
+                        Ok(output) => {
+                            plan_outputs
+                                .insert(format!("data.{}.hooks.outputs", data_name), output);
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "Warning: Hook execution failed during plan for data.{}: {}",
+                                data_name, e
+                            );
+                        }
+                    }
+                }
+                // Unsafe during plan
+                _ => {
+                    eprintln!(
+                        "Warning: Skipping {} hook during plan (will run during deploy)",
+                        hook.event
+                    );
+                }
+            }
+        }
+    }
+
+    // Execute resource hooks (only safe ones)
+    for (resource_name, hooks) in &hook_registry.resource_hooks {
+        for hook in hooks {
+            match hook.event.as_str() {
+                // Safe to run during plan
+                "before_create" | "before_update" => {
+                    let context = HookContext::new(
+                        state.clone(),
+                        "resource".to_string(),
+                        resource_name.to_string(),
+                    );
+
+                    match execute_hook_with_validation(hook, context, Duration::from_secs(10)).await
+                    {
+                        Ok(output) => {
+                            plan_outputs.insert(
+                                format!("resources.{}.hooks.outputs", resource_name),
+                                output,
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "Warning: Hook execution failed during plan for resources.{}: {}",
+                                resource_name, e
+                            );
+                        }
+                    }
+                }
+                // Unsafe during plan
+                "after_create" | "after_update" | "before_delete" | "after_delete" => {
+                    eprintln!(
+                        "Warning: Skipping {} hook during plan (will run during deploy)",
+                        hook.event
+                    );
+                }
+                _ => {
+                    eprintln!("Warning: Unknown hook event '{}' during plan", hook.event);
+                }
+            }
+        }
+    }
+
+    plan_outputs
 }
 
 pub fn diff_data(
@@ -284,7 +377,7 @@ pub fn diff_data(
                         changes.push(DataChange::Changed {
                             source: name.clone(),
                             key: key.clone(),
-                            old_value: String::new(),
+                            old_value: serde_json::Value::Null,
                             new_value: new_val.clone(),
                         });
                     }
@@ -298,7 +391,7 @@ pub fn diff_data(
                         source: name.clone(),
                         key: key.clone(),
                         old_value: old_val.clone(),
-                        new_value: String::new(),
+                        new_value: serde_json::Value::Null,
                     });
                 }
             }

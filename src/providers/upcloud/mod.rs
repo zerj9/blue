@@ -1,3 +1,4 @@
+pub mod managed_object_storage;
 pub mod server;
 pub mod storage;
 
@@ -21,6 +22,15 @@ fn storage_data_schema() -> &'static Schema {
     STORAGE_DATA_SCHEMA.get_or_init(|| {
         Schema::from_toml(include_str!("schemas/storage_data.toml"))
             .expect("built-in storage data schema is invalid")
+    })
+}
+
+static MANAGED_OBJECT_STORAGE_REGIONS_SCHEMA: OnceLock<Schema> = OnceLock::new();
+
+fn managed_object_storage_regions_schema() -> &'static Schema {
+    MANAGED_OBJECT_STORAGE_REGIONS_SCHEMA.get_or_init(|| {
+        Schema::from_toml(include_str!("schemas/managed_object_storage_regions.toml"))
+            .expect("built-in managed object storage regions schema is invalid")
     })
 }
 
@@ -54,6 +64,7 @@ impl Provider for Client {
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         match data_type {
             "storage" => storage::resolve(self, filters),
+            "managed_object_storage_regions" => managed_object_storage::resolve_regions(self, filters),
             other => Err(format!("unknown upcloud data source type: {other}").into()),
         }
     }
@@ -91,6 +102,18 @@ impl Provider for Client {
         }
     }
 
+    fn update_resource(
+        &self,
+        resource_type: &str,
+        old_outputs: &serde_json::Value,
+        new_properties: serde_json::Value,
+    ) -> Result<OperationResult, Box<dyn std::error::Error>> {
+        match resource_type {
+            "server" => server::update(self, old_outputs, new_properties),
+            other => Err(format!("update not supported for upcloud resource type: {other}").into()),
+        }
+    }
+
     fn resource_schema(&self, resource_type: &str) -> Option<&Schema> {
         match resource_type {
             "server" => Some(server_schema()),
@@ -101,6 +124,7 @@ impl Provider for Client {
     fn data_source_schema(&self, data_type: &str) -> Option<&Schema> {
         match data_type {
             "storage" => Some(storage_data_schema()),
+            "managed_object_storage_regions" => Some(managed_object_storage_regions_schema()),
             _ => None,
         }
     }

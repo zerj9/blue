@@ -1,5 +1,80 @@
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::Path;
+
+use crate::schema::json_value_to_string;
+
+
+
+/// Hook registry stores all hooks organized for easy access during deployment
+#[derive(Debug, Default, Clone)]
+pub struct HookRegistry {
+    pub data_hooks: HashMap<String, Vec<Hook>>,      // data.<name> -> hooks
+    pub resource_hooks: HashMap<String, Vec<Hook>>,  // resources.<name> -> hooks
+}
+
+impl HookRegistry {
+    pub fn new() -> Self {
+        Self {
+            data_hooks: HashMap::new(),
+            resource_hooks: HashMap::new(),
+        }
+    }
+    
+    /// Get hooks for a specific data source and event
+    pub fn get_data_hooks(&self, data_name: &str, event: &str) -> Vec<&Hook> {
+        self.data_hooks
+            .get(data_name)
+            .map(|hooks| {
+                hooks.iter()
+                    .filter(|h| h.event == event)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    
+    /// Get hooks for a specific resource and event
+    pub fn get_resource_hooks(&self, resource_name: &str, event: &str) -> Vec<&Hook> {
+        self.resource_hooks
+            .get(resource_name)
+            .map(|hooks| {
+                hooks.iter()
+                    .filter(|h| h.event == event)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    
+    /// Get all hooks for a specific data source
+    pub fn get_all_data_hooks(&self, data_name: &str) -> Vec<&Hook> {
+        self.data_hooks
+            .get(data_name)
+            .map(|hooks| hooks.iter().collect())
+            .unwrap_or_default()
+    }
+    
+    /// Get all hooks for a specific resource
+    pub fn get_all_resource_hooks(&self, resource_name: &str) -> Vec<&Hook> {
+        self.resource_hooks
+            .get(resource_name)
+            .map(|hooks| hooks.iter().collect())
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Hook {
+    pub event: String,
+    pub script: String,
+    #[serde(default)]
+    pub outputs: Vec<HookOutput>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HookOutput {
+    pub name: String,
+    pub r#type: String,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -7,6 +82,8 @@ pub struct Config {
     pub parameters: HashMap<String, Parameter>,
     #[serde(default)]
     pub resources: HashMap<String, Resource>,
+    #[serde(skip)]  // Built during loading, not from TOML
+    pub hook_registry: HookRegistry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -14,6 +91,8 @@ pub struct Resource {
     #[serde(rename = "type")]
     resource_type: String,
     pub properties: Option<toml::Value>,
+    #[serde(default)]
+    pub hooks: Vec<Hook>,
 }
 
 impl Resource {
@@ -46,6 +125,8 @@ pub struct DataSource {
     source_type: String,
     #[serde(default)]
     pub filters: HashMap<String, String>,
+    #[serde(default)]
+    pub hooks: Vec<Hook>,
 }
 
 impl DataSource {
@@ -82,9 +163,9 @@ pub fn extract_data_sources(
 pub fn load(
     raw: &str,
     overrides: &HashMap<String, String>,
-    data_vars: &HashMap<String, String>,
+    data_vars: &HashMap<String, serde_json::Value>,
 ) -> Result<Config, Box<dyn std::error::Error>> {
-    // First pass: extract parameter defaults
+    // First pass: extract parameter defaults and data sources
     let first: FirstPass = toml::from_str(raw)?;
     let mut vars = HashMap::new();
     for (key, param) in &first.parameters {
@@ -93,9 +174,9 @@ pub fn load(
         }
     }
 
-    // Data vars (data.<name>.<field>)
+    // Data vars (data.<name>.<field>) - convert serde_json::Value to String
     for (k, v) in data_vars {
-        vars.insert(k.clone(), v.clone());
+        vars.insert(k.clone(), json_value_to_string(v));
     }
 
     // CLI overrides win
@@ -106,7 +187,12 @@ pub fn load(
     // Interpolate placeholders (defer resource references)
     let interpolated = interpolate(raw, &vars, &["resources."])?;
 
-    let config: Config = toml::from_str(&interpolated)?;
+    let mut config: Config = toml::from_str(&interpolated)?;
+    
+    // Build hook registry
+    let data_sources = extract_data_sources(raw)?;
+    config.hook_registry = build_hook_registry(&data_sources, &config.resources);
+    
     Ok(config)
 }
 
@@ -125,7 +211,12 @@ pub fn load_for_validation(
         vars.insert(k.clone(), v.clone());
     }
     let interpolated = interpolate(raw, &vars, &["resources.", "data."])?;
-    let config: Config = toml::from_str(&interpolated)?;
+    let mut config: Config = toml::from_str(&interpolated)?;
+    
+    // Build hook registry for validation
+    let data_sources = extract_data_sources(raw)?;
+    config.hook_registry = build_hook_registry(&data_sources, &config.resources);
+    
     Ok(config)
 }
 
@@ -226,4 +317,75 @@ pub fn resolve_resource_refs(
     }
     result.push_str(rest);
     Ok(result)
+}
+
+/// Build hook registry from configuration
+pub fn build_hook_registry(
+    data_sources: &HashMap<String, DataSource>,
+    resources: &HashMap<String, Resource>,
+) -> HookRegistry {
+    let mut registry = HookRegistry::new();
+    
+    // Add data source hooks to registry
+    for (name, source) in data_sources {
+        if !source.hooks.is_empty() {
+            registry.data_hooks.insert(name.clone(), source.hooks.clone());
+        }
+    }
+    
+    // Add resource hooks to registry
+    for (name, resource) in resources {
+        if !resource.hooks.is_empty() {
+            registry.resource_hooks.insert(name.clone(), resource.hooks.clone());
+        }
+    }
+    
+    registry
+}
+
+/// Validate hook configurations
+pub fn validate_hooks(
+    hooks: &[Hook],
+    base_path: &str,
+    is_resource: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let valid_resource_events: &[&str] = &["before_create", "after_create", "before_update", "after_update", "before_delete", "after_delete"];
+    let valid_data_events: &[&str] = &["before_read", "after_read"];
+    
+    for hook in hooks {
+        // Validate event type
+        let valid_events = if is_resource {
+            valid_resource_events
+        } else {
+            valid_data_events
+        };
+        
+        if !valid_events.contains(&hook.event.as_str()) {
+            return Err(format!(
+                "Invalid hook event '{}'. Valid events for this type: {}",
+                hook.event,
+                valid_events.join(", ")
+            ).into());
+        }
+        
+        // Validate script file exists
+        let script_path = Path::new(base_path).join(&hook.script);
+        if !script_path.exists() {
+            return Err(format!("Hook script not found: {}", script_path.display()).into());
+        }
+        
+        // Validate output types
+        for output in &hook.outputs {
+            let valid_types = ["string", "integer", "float", "boolean", "array"];
+            if !valid_types.contains(&output.r#type.as_str()) {
+                return Err(format!(
+                    "Invalid output type '{}' in hook. Valid types: {}",
+                    output.r#type,
+                    valid_types.join(", ")
+                ).into());
+            }
+        }
+    }
+    
+    Ok(())
 }

@@ -93,7 +93,7 @@ pub fn run(args: &RefreshArgs) {
                                 schema::extract_outputs(&outputs, &s.outputs).unwrap_or_default();
                             let obj: serde_json::Map<String, serde_json::Value> = map
                                 .into_iter()
-                                .map(|(k, v)| (k, serde_json::Value::String(v)))
+                                .map(|(k, v)| (k, v))
                                 .collect();
                             serde_json::Value::Object(obj)
                         }
@@ -107,6 +107,9 @@ pub fn run(args: &RefreshArgs) {
                 }
                 Ok(provider::OperationResult::InProgress { .. }) => {
                     println!("  {name}: still in progress");
+                }
+                Ok(provider::OperationResult::Updating { .. }) => {
+                    println!("  {name}: update in progress");
                 }
                 Err(e) => {
                     eprintln!("  {name}: refresh error: {e}");

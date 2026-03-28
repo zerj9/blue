@@ -13,6 +13,17 @@ force_new = true
 path = "plan"
 type = "string"
 required = true
+requires_stop = true
+
+[[fields]]
+path = "core_number"
+type = "integer"
+requires_stop = true
+
+[[fields]]
+path = "memory_amount"
+type = "integer"
+requires_stop = true
 
 [[fields]]
 path = "metadata"

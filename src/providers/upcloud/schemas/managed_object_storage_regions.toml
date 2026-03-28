@@ -1,0 +1,19 @@
+[[outputs]]
+path = "name"
+type = "string"
+
+[[outputs]]
+path = "allow_new"
+type = "boolean"
+
+[[outputs]]
+path = "primary_zone"
+type = "string"
+
+[[outputs]]
+path = "zones"
+type = "array"
+
+[[outputs]]
+path = "zones[].name"
+type = "string"

@@ -285,3 +285,135 @@ fn json_as_i64(value: &serde_json::Value) -> Option<i64> {
         _ => None,
     }
 }
+
+pub fn update(
+    client: &Client,
+    old_outputs: &serde_json::Value,
+    new_properties: serde_json::Value,
+) -> Result<OperationResult, Box<dyn std::error::Error>> {
+    // Extract server UUID from old outputs
+    let uuid = old_outputs
+        .get("uuid")
+        .and_then(|v| v.as_str())
+        .ok_or("missing uuid in server outputs")?;
+
+    // Build the update request
+    let mut update_request = serde_json::json!({
+        "server": {
+            "uuid": uuid
+        }
+    });
+
+    // Add simple updatable properties (can be updated on running servers)
+    if let Some(title) = new_properties.get("title").and_then(|v| v.as_str()) {
+        update_request["server"]["title"] = serde_json::Value::String(title.to_string());
+    }
+
+    if let Some(hostname) = new_properties.get("hostname").and_then(|v| v.as_str()) {
+        update_request["server"]["hostname"] = serde_json::Value::String(hostname.to_string());
+    }
+
+    if let Some(firewall) = new_properties.get("firewall").and_then(|v| v.as_str()) {
+        update_request["server"]["firewall"] = serde_json::Value::String(firewall.to_string());
+    }
+
+    if let Some(metadata) = new_properties.get("metadata").and_then(|v| v.as_str()) {
+        update_request["server"]["metadata"] = serde_json::Value::String(metadata.to_string());
+    }
+
+    if let Some(simple_backup) = new_properties.get("simple_backup") {
+        update_request["server"]["simple_backup"] = simple_backup.clone();
+    }
+
+    if let Some(timezone) = new_properties.get("timezone").and_then(|v| v.as_str()) {
+        update_request["server"]["timezone"] = serde_json::Value::String(timezone.to_string());
+    }
+
+    if let Some(boot_order) = new_properties.get("boot_order").and_then(|v| v.as_str()) {
+        update_request["server"]["boot_order"] = serde_json::Value::String(boot_order.to_string());
+    }
+
+    if let Some(nic_model) = new_properties.get("nic_model").and_then(|v| v.as_str()) {
+        update_request["server"]["nic_model"] = serde_json::Value::String(nic_model.to_string());
+    }
+
+    if let Some(video_model) = new_properties.get("video_model").and_then(|v| v.as_str()) {
+        update_request["server"]["video_model"] = serde_json::Value::String(video_model.to_string());
+    }
+
+    // Complex updates that may require server to be stopped
+    // These are commented out for now as they require more complex handling
+    // and state checking
+    
+    /*
+    if let Some(core_number) = new_properties.get("core_number") {
+        update_request["server"]["core_number"] = core_number.clone();
+    }
+
+    if let Some(memory_amount) = new_properties.get("memory_amount") {
+        update_request["server"]["memory_amount"] = memory_amount.clone();
+    }
+
+    if let Some(plan) = new_properties.get("plan").and_then(|v| v.as_str()) {
+        update_request["server"]["plan"] = serde_json::Value::String(plan.to_string());
+    }
+    */
+
+    // Note: Storage devices and IP addresses require separate API calls
+    // and are not handled by this update operation
+
+    let url = format!("{}/1.3/server/{}", client.base_url, uuid);
+    let resp = client
+        .http
+        .put(&url)
+        .bearer_auth(&client.token)
+        .json(&update_request)
+        .send()?
+        .error_for_status()?;
+
+    let text = resp.text()?;
+    let body: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("failed to parse server update response: {e}"))?;
+
+    // Extract the updated server information
+    let server_info = body.get("server")
+        .and_then(|s| s.as_object())
+        .ok_or_else(|| "unexpected server update response: expected server object")?;
+
+    // Return the updated outputs
+    let mut outputs = old_outputs.clone();
+    
+    // Update the fields that were changed
+    if let Some(title) = server_info.get("title").and_then(|v| v.as_str()) {
+        outputs["title"] = serde_json::Value::String(title.to_string());
+    }
+    if let Some(hostname) = server_info.get("hostname").and_then(|v| v.as_str()) {
+        outputs["hostname"] = serde_json::Value::String(hostname.to_string());
+    }
+    if let Some(firewall) = server_info.get("firewall").and_then(|v| v.as_str()) {
+        outputs["firewall"] = serde_json::Value::String(firewall.to_string());
+    }
+    if let Some(metadata) = server_info.get("metadata").and_then(|v| v.as_str()) {
+        outputs["metadata"] = serde_json::Value::String(metadata.to_string());
+    }
+    if let Some(simple_backup) = server_info.get("simple_backup") {
+        outputs["simple_backup"] = simple_backup.clone();
+    }
+    if let Some(timezone) = server_info.get("timezone").and_then(|v| v.as_str()) {
+        outputs["timezone"] = serde_json::Value::String(timezone.to_string());
+    }
+    if let Some(boot_order) = server_info.get("boot_order").and_then(|v| v.as_str()) {
+        outputs["boot_order"] = serde_json::Value::String(boot_order.to_string());
+    }
+    if let Some(nic_model) = server_info.get("nic_model").and_then(|v| v.as_str()) {
+        outputs["nic_model"] = serde_json::Value::String(nic_model.to_string());
+    }
+    if let Some(video_model) = server_info.get("video_model").and_then(|v| v.as_str()) {
+        outputs["video_model"] = serde_json::Value::String(video_model.to_string());
+    }
+    if let Some(state) = server_info.get("state").and_then(|v| v.as_str()) {
+        outputs["state"] = serde_json::Value::String(state.to_string());
+    }
+
+    Ok(OperationResult::Complete { outputs })
+}

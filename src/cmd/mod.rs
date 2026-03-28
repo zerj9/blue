@@ -12,8 +12,9 @@ use crate::{config, provider, providers, state};
 pub(crate) struct ResolvedConfig {
     pub config: config::Config,
     pub data_sources: HashMap<String, config::DataSource>,
-    pub data_vars: HashMap<String, String>,
+    pub data_vars: HashMap<String, serde_json::Value>,
     pub registry: provider::ProviderRegistry,
+    pub hook_registry: config::HookRegistry,
 }
 
 pub(crate) fn resolve_config(
@@ -68,11 +69,13 @@ pub(crate) fn resolve_config(
         std::process::exit(1);
     }
 
+    let hook_registry = config.hook_registry.clone();
     ResolvedConfig {
         config,
         data_sources,
         data_vars,
         registry,
+        hook_registry,
     }
 }
 
@@ -264,12 +267,23 @@ pub(crate) fn print_data_changes(changes: &[state::DataChange]) {
                 old_value,
                 new_value,
             } => {
-                if old_value.is_empty() {
-                    println!("  ~ data.{source}.{key}: (new) -> \"{new_value}\"");
-                } else if new_value.is_empty() {
-                    println!("  ~ data.{source}.{key}: \"{old_value}\" -> (removed)");
+                let old_str = if old_value.is_null() {
+                    "(none)".to_string()
                 } else {
-                    println!("  ~ data.{source}.{key}: \"{old_value}\" -> \"{new_value}\"");
+                    old_value.to_string()
+                };
+                let new_str = if new_value.is_null() {
+                    "(none)".to_string()
+                } else {
+                    new_value.to_string()
+                };
+                
+                if old_value.is_null() {
+                    println!("  ~ data.{source}.{key}: (new) -> {new_str}");
+                } else if new_value.is_null() {
+                    println!("  ~ data.{source}.{key}: {old_str} -> (removed)");
+                } else {
+                    println!("  ~ data.{source}.{key}: {old_str} -> {new_str}");
                 }
             }
             state::DataChange::FiltersChanged { source } => {

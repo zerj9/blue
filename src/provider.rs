@@ -13,6 +13,7 @@ pub enum ProviderMode {
 pub enum OperationResult {
     Complete { outputs: serde_json::Value },
     InProgress { outputs: serde_json::Value },
+    Updating { outputs: serde_json::Value },
     Failed { error: String },
 }
 
@@ -33,6 +34,13 @@ pub trait Provider {
         &self,
         resource_type: &str,
         outputs: &serde_json::Value,
+    ) -> Result<OperationResult, Box<dyn std::error::Error>>;
+
+    fn update_resource(
+        &self,
+        resource_type: &str,
+        old_outputs: &serde_json::Value,
+        new_properties: serde_json::Value,
     ) -> Result<OperationResult, Box<dyn std::error::Error>>;
 
     fn delete_resource(
@@ -82,7 +90,7 @@ impl ProviderRegistry {
     pub fn resolve_data_sources(
         &mut self,
         sources: &HashMap<String, config::DataSource>,
-    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
         let mut vars = HashMap::new();
         for (name, source) in sources {
             let (provider_name, data_type) = source.provider_and_type()?;
@@ -134,6 +142,17 @@ impl ProviderRegistry {
         let (provider_name, resource_type) = config::split_provider_type(full_type)?;
         let provider = self.get_or_init(provider_name)?;
         provider.delete_resource(resource_type, outputs)
+    }
+
+    pub fn update_resource(
+        &mut self,
+        full_type: &str,
+        old_outputs: &serde_json::Value,
+        new_properties: serde_json::Value,
+    ) -> Result<OperationResult, Box<dyn std::error::Error>> {
+        let (provider_name, resource_type) = config::split_provider_type(full_type)?;
+        let provider = self.get_or_init(provider_name)?;
+        provider.update_resource(resource_type, old_outputs, new_properties)
     }
 
     pub fn resource_schema(
