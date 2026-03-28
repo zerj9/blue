@@ -30,33 +30,25 @@ pub struct PlanArgs {
     state: PathBuf,
 }
 
-pub fn run(args: &PlanArgs) {
+pub fn run(args: &PlanArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!("Planning changes from: {}", args.file.display());
     println!("  State file: {}", args.state.display());
     print_var_info(&args.var, args.var_file.as_deref());
 
-    let old_state = match state::load(&args.state) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error: failed to load state file: {e}");
-            std::process::exit(1);
-        }
-    };
+    let old_state = state::load(&args.state)?;
 
-    let mut resolved = resolve_config(&args.file, &args.var, args.var_file.as_deref());
+    let mut resolved = resolve_config(&args.file, &args.var, args.var_file.as_deref())?;
     print_config(&resolved.config);
 
-    // Graph-driven resolution: resolves data sources, executes hooks, populates registry
-    resolve_graph(&mut resolved);
+    resolve_graph(&mut resolved)?;
 
-    let changeset = compute_changeset(&old_state, &mut resolved);
+    let changeset = compute_changeset(&old_state, &mut resolved)?;
     print_changeset(&changeset);
 
     if let Some(ref out_path) = args.out {
-        if let Err(e) = state::save_changeset(&changeset, out_path) {
-            eprintln!("Error: failed to write changeset: {e}");
-            std::process::exit(1);
-        }
+        state::save_changeset(&changeset, out_path)?;
         println!("\nChangeset written to {}", out_path.display());
     }
+
+    Ok(())
 }

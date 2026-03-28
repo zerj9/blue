@@ -20,113 +20,78 @@ pub(crate) fn resolve_config(
     file: &Path,
     var: &[String],
     var_file: Option<&Path>,
-) -> ResolvedConfig {
-    let cli_vars = build_cli_vars(var, var_file);
+) -> Result<ResolvedConfig, Box<dyn std::error::Error>> {
+    let cli_vars = build_cli_vars(var, var_file)?;
 
-    let raw = match std::fs::read_to_string(file) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Error: failed to read {}: {e}", file.display());
-            std::process::exit(1);
-        }
-    };
+    let raw = std::fs::read_to_string(file)
+        .map_err(|e| format!("failed to read {}: {e}", file.display()))?;
 
     let config_dir = match file.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
         _ => Path::new("."),
     };
-    let config = match config::load(&raw, &cli_vars, config_dir) {
-        Ok(config) => config,
-        Err(e) => {
-            eprintln!("Error: failed to parse {}: {e}", file.display());
-            std::process::exit(1);
-        }
-    };
+    let config = config::load(&raw, &cli_vars, config_dir)
+        .map_err(|e| format!("failed to parse {}: {e}", file.display()))?;
 
-    let dep_graph = match graph::DependencyGraph::build(&config.data, &config.resources) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("Error: failed to build dependency graph: {e}");
-            std::process::exit(1);
-        }
-    };
+    let dep_graph = graph::DependencyGraph::build(&config.data, &config.resources)
+        .map_err(|e| format!("failed to build dependency graph: {e}"))?;
 
     let registry = providers::build_registry(provider::ProviderMode::Live);
 
     if !config.resources.is_empty() {
         let mut schema_registry = providers::build_registry(provider::ProviderMode::SchemaOnly);
-        if let Err(e) = schema_registry.validate_resources(&config.resources) {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        }
+        schema_registry.validate_resources(&config.resources)?;
     }
 
     let output_registry = reference::OutputRegistry::new();
 
-    ResolvedConfig {
+    Ok(ResolvedConfig {
         config,
         graph: dep_graph,
         output_registry,
         registry,
-    }
+    })
 }
 
 /// Walk the dependency graph in topological order, resolving data sources
 /// and executing hooks just-in-time. Populates the output registry.
-pub(crate) fn resolve_graph(resolved: &mut ResolvedConfig) {
-    let order = match resolved.graph.topological_sort() {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        }
-    };
+pub(crate) fn resolve_graph(
+    resolved: &mut ResolvedConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let order = resolved.graph.topological_sort()?;
 
     for (name, kind) in &order {
         match kind {
             graph::NodeKind::Data => {
-                resolve_data_node(name, resolved);
+                resolve_data_node(name, resolved)?;
             }
             graph::NodeKind::Resource => {
-                resolve_resource_hooks(name, resolved);
+                resolve_resource_hooks(name, resolved)?;
             }
         }
     }
+    Ok(())
 }
 
-fn resolve_data_node(name: &str, resolved: &mut ResolvedConfig) {
+fn resolve_data_node(
+    name: &str,
+    resolved: &mut ResolvedConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     let source = match resolved.config.data.get(name) {
         Some(s) => s,
-        None => return,
+        None => return Ok(()),
     };
 
-    let (provider_name, data_type) = match source.provider_and_type() {
-        Ok(pt) => pt,
-        Err(e) => {
-            eprintln!("Error: data.{name}: {e}");
-            std::process::exit(1);
-        }
-    };
+    let (provider_name, data_type) = source
+        .provider_and_type()
+        .map_err(|e| format!("data.{name}: {e}"))?;
 
-    let filters = match serde_json::to_value(&source.filters) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("Error: data.{name}: {e}");
-            std::process::exit(1);
-        }
-    };
+    let filters = serde_json::to_value(&source.filters).map_err(|e| format!("data.{name}: {e}"))?;
 
-    let raw_value =
-        match resolved
-            .registry
-            .resolve_single_data_source(provider_name, data_type, filters)
-        {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("Error: data.{name}: {e}");
-                std::process::exit(1);
-            }
-        };
+    let raw_value = resolved
+        .registry
+        .resolve_single_data_source(provider_name, data_type, filters)
+        .map_err(|e| format!("data.{name}: {e}"))?;
 
     // Extract schema outputs and insert into registry
     let provider_schema = resolved
@@ -141,45 +106,37 @@ fn resolve_data_node(name: &str, resolved: &mut ResolvedConfig) {
     }
 
     let hooks_list: Vec<config::Hook> = source.hooks.clone();
-    if let Err(e) = hooks::execute_data_hooks(&hooks_list, name, &mut resolved.output_registry) {
-        eprintln!("Error: {e}");
-        std::process::exit(1);
-    }
+    hooks::execute_data_hooks(&hooks_list, name, &mut resolved.output_registry)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+    Ok(())
 }
 
-fn resolve_resource_hooks(name: &str, resolved: &mut ResolvedConfig) {
+fn resolve_resource_hooks(
+    name: &str,
+    resolved: &mut ResolvedConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     let resource = match resolved.config.resources.get(name) {
         Some(r) => r,
-        None => return,
+        None => return Ok(()),
     };
 
     let hooks_list: Vec<config::Hook> = resource.hooks.clone();
-    if let Err(e) =
-        hooks::execute_safe_resource_hooks(&hooks_list, name, &mut resolved.output_registry)
-    {
-        eprintln!("Error: {e}");
-        std::process::exit(1);
-    }
+    hooks::execute_safe_resource_hooks(&hooks_list, name, &mut resolved.output_registry)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+    Ok(())
 }
 
-pub(crate) fn build_cli_vars(var: &[String], var_file: Option<&Path>) -> HashMap<String, String> {
+pub(crate) fn build_cli_vars(
+    var: &[String],
+    var_file: Option<&Path>,
+) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
     let mut cli_vars = HashMap::new();
 
     if let Some(var_file) = var_file {
-        let contents = match std::fs::read_to_string(var_file) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error: failed to read {}: {e}", var_file.display());
-                std::process::exit(1);
-            }
-        };
-        let table: HashMap<String, toml::Value> = match toml::from_str(&contents) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("Error: failed to parse {}: {e}", var_file.display());
-                std::process::exit(1);
-            }
-        };
+        let contents = std::fs::read_to_string(var_file)
+            .map_err(|e| format!("failed to read {}: {e}", var_file.display()))?;
+        let table: HashMap<String, toml::Value> = toml::from_str(&contents)
+            .map_err(|e| format!("failed to parse {}: {e}", var_file.display()))?;
         for (k, v) in table {
             cli_vars.insert(k, config::toml_value_to_string(&v));
         }
@@ -189,18 +146,17 @@ pub(crate) fn build_cli_vars(var: &[String], var_file: Option<&Path>) -> HashMap
         if let Some((k, v)) = entry.split_once('=') {
             cli_vars.insert(k.to_string(), v.to_string());
         } else {
-            eprintln!("Error: invalid --var format: {entry} (expected KEY=VALUE)");
-            std::process::exit(1);
+            return Err(format!("invalid --var format: {entry} (expected KEY=VALUE)").into());
         }
     }
 
-    cli_vars
+    Ok(cli_vars)
 }
 
 pub(crate) fn compute_changeset(
     old_state: &state::State,
     resolved: &mut ResolvedConfig,
-) -> state::Changeset {
+) -> Result<state::Changeset, Box<dyn std::error::Error>> {
     let data_vars = resolved.output_registry.to_data_vars();
     let data_snapshots = state::snapshot_data(&resolved.config.data, &data_vars);
     let data_changes = state::diff_data(&old_state.data, &data_snapshots);
@@ -208,26 +164,20 @@ pub(crate) fn compute_changeset(
     // Resolve resource properties using the output registry before snapshotting
     let resource_snapshots =
         state::snapshot_resources_resolved(&resolved.config.resources, &resolved.output_registry);
-    let resource_changes = match state::diff_resources(
+    let resource_changes = state::diff_resources(
         &old_state.resources,
         &resource_snapshots,
         &mut resolved.registry,
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error: failed to diff resources: {e}");
-            std::process::exit(1);
-        }
-    };
+    )?;
 
-    state::Changeset {
+    Ok(state::Changeset {
         version: 1,
         base_serial: old_state.serial,
         data_snapshots,
         resource_snapshots,
         data_changes,
         resource_changes,
-    }
+    })
 }
 
 pub(crate) fn print_changeset(changeset: &state::Changeset) {

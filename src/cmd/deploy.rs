@@ -31,39 +31,24 @@ pub struct DeployArgs {
     state: PathBuf,
 }
 
-pub fn run(args: &DeployArgs) {
+pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
     if args.file.is_none() && args.plan.is_none() {
-        eprintln!("Error: either --file or --plan must be provided");
-        std::process::exit(1);
+        return Err("either --file or --plan must be provided".into());
     }
 
-    let old_state = match state::load(&args.state) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error: failed to load state file: {e}");
-            std::process::exit(1);
-        }
-    };
+    let old_state = state::load(&args.state)?;
 
     let (changeset, mut registry) = if let Some(ref plan_path) = args.plan {
         println!("Deploying from changeset: {}", plan_path.display());
         println!("  State file: {}", args.state.display());
 
-        let cs = match state::load_changeset(plan_path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error: failed to load changeset: {e}");
-                std::process::exit(1);
-            }
-        };
+        let cs = state::load_changeset(plan_path)?;
 
         if cs.base_serial != old_state.serial {
-            eprintln!(
-                "Error: changeset is stale (plan serial: {}, current state serial: {})",
+            return Err(format!(
+                "changeset is stale (plan serial: {}, current state serial: {}). Run 'blue plan' again.",
                 cs.base_serial, old_state.serial
-            );
-            eprintln!("The state has changed since this plan was created. Run 'blue plan' again.");
-            std::process::exit(1);
+            ).into());
         }
 
         (cs, providers::build_registry(provider::ProviderMode::Live))
@@ -73,11 +58,11 @@ pub fn run(args: &DeployArgs) {
         println!("  State file: {}", args.state.display());
         print_var_info(&args.var, args.var_file.as_deref());
 
-        let mut resolved = resolve_config(file, &args.var, args.var_file.as_deref());
+        let mut resolved = resolve_config(file, &args.var, args.var_file.as_deref())?;
         print_config(&resolved.config);
-        resolve_graph(&mut resolved);
+        resolve_graph(&mut resolved)?;
 
-        let cs = compute_changeset(&old_state, &mut resolved);
+        let cs = compute_changeset(&old_state, &mut resolved)?;
         (cs, resolved.registry)
     };
 
@@ -89,19 +74,15 @@ pub fn run(args: &DeployArgs) {
         .any(|c| !matches!(c, state::ResourceChange::Unchanged { .. }));
 
     if !has_changes {
-        // No resource changes — just save data snapshots
         let new_state = state::State {
             version: 1,
             serial: old_state.serial,
             data: changeset.data_snapshots.clone(),
             resources: old_state.resources,
         };
-        if let Err(e) = state::save(new_state, &args.state) {
-            eprintln!("Error: failed to write state file: {e}");
-            std::process::exit(1);
-        }
+        state::save(new_state, &args.state)?;
         println!("\nState saved to {}", args.state.display());
-        return;
+        return Ok(());
     }
 
     let mut current_state = state::State {
@@ -111,10 +92,8 @@ pub fn run(args: &DeployArgs) {
         resources: old_state.resources,
     };
 
-    if let Err(e) = deploy::execute(&changeset, &mut current_state, &mut registry, &args.state) {
-        eprintln!("Error: {e}");
-        std::process::exit(1);
-    }
+    deploy::execute(&changeset, &mut current_state, &mut registry, &args.state)?;
 
     println!("\nDeploy complete. State saved to {}", args.state.display());
+    Ok(())
 }

@@ -21,46 +21,30 @@ pub struct ValidateArgs {
     var_file: Option<PathBuf>,
 }
 
-pub fn run(args: &ValidateArgs) {
+pub fn run(args: &ValidateArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!("Validating: {}", args.file.display());
 
-    let raw = match std::fs::read_to_string(&args.file) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Error: failed to read {}: {e}", args.file.display());
-            std::process::exit(1);
-        }
-    };
+    let raw = std::fs::read_to_string(&args.file)
+        .map_err(|e| format!("failed to read {}: {e}", args.file.display()))?;
 
     // Load config (resolves and validates hook script paths)
     let file_path = match args.file.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
         _ => Path::new("."),
     };
-    let cli_vars = build_cli_vars(&args.var, args.var_file.as_deref());
-    let config = match config::load_for_validation(&raw, &cli_vars, file_path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        }
-    };
+    let cli_vars = build_cli_vars(&args.var, args.var_file.as_deref())?;
+    let config = config::load_for_validation(&raw, &cli_vars, file_path)?;
 
     // Validate data source hooks
     let data_sources = &config.data;
     for (name, source) in data_sources {
-        if let Err(e) = config::validate_hooks(&source.hooks, false) {
-            eprintln!("Error: data.{name}: {e}");
-            std::process::exit(1);
-        }
+        config::validate_hooks(&source.hooks, false).map_err(|e| format!("data.{name}: {e}"))?;
     }
 
     // Validate resource hooks
     for (name, resource) in &config.resources {
-        if let Err(e) = config::validate_hooks(&resource.hooks, true) {
-            eprintln!("Error: resources.{name}: {e}");
-            std::process::exit(1);
-        }
+        config::validate_hooks(&resource.hooks, true)
+            .map_err(|e| format!("resources.{name}: {e}"))?;
     }
 
     let mut registry = providers::build_registry(provider::ProviderMode::SchemaOnly);
@@ -78,26 +62,18 @@ pub fn run(args: &ValidateArgs) {
         }
     }
     let provider_refs: Vec<&str> = provider_names.iter().map(|s| s.as_str()).collect();
-    if let Err(e) = registry.ensure_providers(&provider_refs) {
-        eprintln!("Error: {e}");
-        std::process::exit(1);
-    }
+    registry.ensure_providers(&provider_refs)?;
 
     // Build data_schemas map
     let mut data_schemas = HashMap::new();
     for (name, source) in data_sources {
         let full_type = source.source_type();
-        match registry.data_source_schema_ref(full_type) {
-            Ok(Some(s)) => {
+        match registry.data_source_schema_ref(full_type)? {
+            Some(s) => {
                 data_schemas.insert(name.clone(), s);
             }
-            Ok(None) => {
-                eprintln!("Error: data.{name}: unknown data source type '{full_type}'");
-                std::process::exit(1);
-            }
-            Err(e) => {
-                eprintln!("Error: data.{name}: {e}");
-                std::process::exit(1);
+            None => {
+                return Err(format!("data.{name}: unknown data source type '{full_type}'").into());
             }
         }
     }
@@ -105,26 +81,15 @@ pub fn run(args: &ValidateArgs) {
     // Build resource_schemas map
     let mut resource_schemas = HashMap::new();
     for (name, resource) in &config.resources {
-        let (provider_name, resource_type) = match resource.provider_and_type() {
-            Ok(pt) => pt,
-            Err(e) => {
-                eprintln!("Error: resources.{name}: {e}");
-                std::process::exit(1);
-            }
-        };
-        match registry.resource_schema_ref(resource.resource_type()) {
-            Ok(Some(s)) => {
+        let (provider_name, resource_type) = resource.provider_and_type()?;
+        match registry.resource_schema_ref(resource.resource_type())? {
+            Some(s) => {
                 resource_schemas.insert(name.clone(), s);
             }
-            Ok(None) => {
-                eprintln!(
-                    "Error: resources.{name}: unknown resource type '{resource_type}' for provider '{provider_name}'"
-                );
-                std::process::exit(1);
-            }
-            Err(e) => {
-                eprintln!("Error: resources.{name}: {e}");
-                std::process::exit(1);
+            None => {
+                return Err(format!(
+                    "resources.{name}: unknown resource type '{resource_type}' for provider '{provider_name}'"
+                ).into());
             }
         }
     }
@@ -175,9 +140,9 @@ pub fn run(args: &ValidateArgs) {
             .map(|e| e.to_string())
             .collect::<Vec<_>>()
             .join("\n");
-        eprintln!("Error: {msg}");
-        std::process::exit(1);
+        return Err(msg.into());
     }
 
     println!("Configuration is valid.");
+    Ok(())
 }

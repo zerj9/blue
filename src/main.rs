@@ -39,11 +39,16 @@ enum Command {
 fn main() {
     let cli = Cli::parse();
 
-    match cli.command {
+    let result = match cli.command {
         Command::Validate(args) => cmd::validate::run(&args),
         Command::Plan(args) => cmd::plan::run(&args),
         Command::Deploy(args) => cmd::deploy::run(&args),
         Command::Destroy(args) => cmd::destroy::run(&args),
         Command::Refresh(args) => cmd::refresh::run(&args),
+    };
+
+    if let Err(e) = result {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
     }
 }

@@ -24,22 +24,16 @@ pub struct RefreshArgs {
     state: PathBuf,
 }
 
-pub fn run(args: &RefreshArgs) {
+pub fn run(args: &RefreshArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!("Refreshing state from: {}", args.file.display());
     println!("  State file: {}", args.state.display());
     print_var_info(&args.var, args.var_file.as_deref());
 
-    let old_state = match state::load(&args.state) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error: failed to load state file: {e}");
-            std::process::exit(1);
-        }
-    };
+    let old_state = state::load(&args.state)?;
 
     // Resolve data sources via graph-driven resolution
-    let mut resolved = resolve_config(&args.file, &args.var, args.var_file.as_deref());
-    resolve_graph(&mut resolved);
+    let mut resolved = resolve_config(&args.file, &args.var, args.var_file.as_deref())?;
+    resolve_graph(&mut resolved)?;
 
     let data_vars = resolved.output_registry.to_data_vars();
     let new_data = state::snapshot_data(&resolved.config.data, &data_vars);
@@ -70,7 +64,7 @@ pub fn run(args: &RefreshArgs) {
                             let map =
                                 schema::extract_outputs(&outputs, &s.outputs).unwrap_or_default();
                             let obj: serde_json::Map<String, serde_json::Value> =
-                                map.into_iter().map(|(k, v)| (k, v)).collect();
+                                map.into_iter().collect();
                             serde_json::Value::Object(obj)
                         }
                         None => outputs,
@@ -107,19 +101,15 @@ pub fn run(args: &RefreshArgs) {
         }
     }
 
-    let final_resources = new_resources;
-
     let new_state = state::State {
         version: 1,
         serial: old_state.serial,
         data: new_data,
-        resources: final_resources,
+        resources: new_resources,
     };
 
-    if let Err(e) = state::save(new_state, &args.state) {
-        eprintln!("Error: failed to write state file: {e}");
-        std::process::exit(1);
-    }
+    state::save(new_state, &args.state)?;
 
     println!("\nState refreshed and saved to {}", args.state.display());
+    Ok(())
 }
