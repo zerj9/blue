@@ -7,6 +7,37 @@ use crate::reference::{OutputRegistry, Ref};
 use crate::schema;
 use crate::state::{self, PropertyChange, ResourceSnapshot, ResourceStatus, State};
 
+fn set_resource_status(
+    state: &mut State,
+    name: &str,
+    status: ResourceStatus,
+    state_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    state.resources.get_mut(name).unwrap().status = status;
+    state::save_ref(state, state_path)
+}
+
+fn save_resource(
+    state: &mut State,
+    name: &str,
+    resource_type: &str,
+    status: ResourceStatus,
+    properties: &serde_json::Value,
+    outputs: serde_json::Value,
+    state_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    state.resources.insert(
+        name.to_string(),
+        ResourceSnapshot {
+            resource_type: resource_type.to_string(),
+            status,
+            properties: properties.clone(),
+            outputs,
+        },
+    );
+    state::save_ref(state, state_path)
+}
+
 pub fn execute(
     changeset: &state::Changeset,
     state: &mut State,
@@ -132,44 +163,17 @@ fn create_resource(
     match result {
         OperationResult::Complete { outputs } => {
             let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-            state.resources.insert(
-                name.to_string(),
-                ResourceSnapshot {
-                    resource_type: resource_type.to_string(),
-                    status: ResourceStatus::Ready,
-                    properties: properties.clone(),
-                    outputs: extracted,
-                },
-            );
-            state::save_ref(state, state_path)?;
+            save_resource(state, name, resource_type, ResourceStatus::Ready, properties, extracted, state_path)?;
             println!("  {name}: created");
         }
         OperationResult::InProgress { outputs } => {
             let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-            state.resources.insert(
-                name.to_string(),
-                ResourceSnapshot {
-                    resource_type: resource_type.to_string(),
-                    status: ResourceStatus::Creating,
-                    properties: properties.clone(),
-                    outputs: extracted,
-                },
-            );
-            state::save_ref(state, state_path)?;
+            save_resource(state, name, resource_type, ResourceStatus::Creating, properties, extracted, state_path)?;
             poll_until_ready(name, resource_type, state, registry, state_path)?;
         }
         OperationResult::Updating { outputs } => {
             let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-            state.resources.insert(
-                name.to_string(),
-                ResourceSnapshot {
-                    resource_type: resource_type.to_string(),
-                    status: ResourceStatus::Ready,
-                    properties: properties.clone(),
-                    outputs: extracted,
-                },
-            );
-            state::save_ref(state, state_path)?;
+            save_resource(state, name, resource_type, ResourceStatus::Ready, properties, extracted, state_path)?;
             println!("  {name}: created (updating)");
         }
         OperationResult::Failed { error } => {
@@ -194,10 +198,7 @@ pub fn delete_resource(
     let resource_type = snap.resource_type.clone();
     let outputs = snap.outputs.clone();
 
-    // Mark as Deleting
-    let snap = state.resources.get_mut(name).unwrap();
-    snap.status = ResourceStatus::Deleting;
-    state::save_ref(state, state_path)?;
+    set_resource_status(state, name, ResourceStatus::Deleting, state_path)?;
 
     println!("Deleting {name} ({resource_type})...");
 
@@ -210,9 +211,7 @@ pub fn delete_resource(
             println!("  {name}: deleted");
         }
         OperationResult::Failed { error } => {
-            let snap = state.resources.get_mut(name).unwrap();
-            snap.status = ResourceStatus::Failed;
-            state::save_ref(state, state_path)?;
+            set_resource_status(state, name, ResourceStatus::Failed, state_path)?;
             return Err(format!("{name}: delete failed: {error}").into());
         }
         OperationResult::InProgress { .. } | OperationResult::Updating { .. } => {
@@ -259,30 +258,21 @@ fn stop_resource(
         return Ok(());
     }
     
-    // Mark as Stopping
-    let snap = state.resources.get_mut(name).unwrap();
-    snap.status = ResourceStatus::Stopping;
-    state::save_ref(state, state_path)?;
-    
+    set_resource_status(state, name, ResourceStatus::Stopping, state_path)?;
+
     println!("Stopping {name} ({resource_type})...");
-    
-    // Log progress every 10 seconds
+
     let start = std::time::Instant::now();
     loop {
         std::thread::sleep(std::time::Duration::from_secs(10));
         println!("  {name}: stopping... (current: Stopping, desired: Stopped)");
-        
-        // Check if stopped (provider-specific logic would go here)
-        // For now, we'll simulate this with a timeout
+
         if start.elapsed() > std::time::Duration::from_secs(30) {
-            let snap = state.resources.get_mut(name).unwrap();
-            snap.status = ResourceStatus::Ready; // Return to ready on timeout for now
-            state::save_ref(state, state_path)?;
+            set_resource_status(state, name, ResourceStatus::Ready, state_path)?;
             return Err(format!("{name}: stop operation timed out").into());
         }
-        
-        // In a real implementation, we would check the actual server state
-        // via the provider API and break when stopped
+
+        // TODO: Check actual server state via provider API and break when stopped
     }
 }
 
@@ -301,29 +291,21 @@ fn start_resource(
         return Ok(());
     }
     
-    // Mark as Starting
-    let snap = state.resources.get_mut(name).unwrap();
-    snap.status = ResourceStatus::Starting;
-    state::save_ref(state, state_path)?;
-    
+    set_resource_status(state, name, ResourceStatus::Starting, state_path)?;
+
     println!("Starting {name} ({resource_type})...");
-    
-    // Log progress every 10 seconds
+
     let start = std::time::Instant::now();
     loop {
         std::thread::sleep(std::time::Duration::from_secs(10));
         println!("  {name}: starting... (current: Starting, desired: Ready)");
-        
-        // Check if started (provider-specific logic would go here)
+
         if start.elapsed() > std::time::Duration::from_secs(30) {
-            let snap = state.resources.get_mut(name).unwrap();
-            snap.status = ResourceStatus::Failed;
-            state::save_ref(state, state_path)?;
+            set_resource_status(state, name, ResourceStatus::Failed, state_path)?;
             return Err(format!("{name}: start operation timed out").into());
         }
-        
-        // In a real implementation, we would check the actual server state
-        // via the provider API and break when started
+
+        // TODO: Check actual server state via provider API and break when started
     }
 }
 
@@ -393,28 +375,19 @@ fn update_resource(
         // Stop the resource first
         stop_resource(name, resource_type, state, registry, state_path)?;
         
-        // Mark as Updating
-        {
-            let snap = state.resources.get_mut(name).unwrap();
-            snap.status = ResourceStatus::Updating;
-            state::save_ref(state, state_path)?;
-        }
-        
-        // Log progress every 10 seconds during update
+        set_resource_status(state, name, ResourceStatus::Updating, state_path)?;
+
         let start = std::time::Instant::now();
         loop {
             std::thread::sleep(std::time::Duration::from_secs(10));
             println!("  {name}: updating... (current: Updating, desired: Ready)");
-            
+
             if start.elapsed() > std::time::Duration::from_secs(30) {
-                let snap = state.resources.get_mut(name).unwrap();
-                snap.status = ResourceStatus::Failed;
-                state::save_ref(state, state_path)?;
+                set_resource_status(state, name, ResourceStatus::Failed, state_path)?;
                 return Err(format!("{name}: update operation timed out").into());
             }
-            
-            // In real implementation, check actual update progress
-            // For now we'll proceed to the actual update call
+
+            // TODO: Check actual update progress via provider API
             break;
         }
     } else {
@@ -423,96 +396,43 @@ fn update_resource(
 
     let result = registry.update_resource(resource_type, &old_outputs, resolved_props)?;
 
-    match result {
-        OperationResult::Complete { outputs } => {
-            let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-            
-            // Update the resource state
-            {
-                if let Some(snapshot) = state.resources.get_mut(name) {
-                    snapshot.properties = new_properties;
-                    snapshot.outputs = extracted;
-                }
-            }
-            
-            if requires_stop {
-                // Start the resource after successful update
-                start_resource(name, resource_type, state, registry, state_path)?;
-                // Update status to Ready after successful start
-                if let Some(snapshot) = state.resources.get_mut(name) {
-                    snapshot.status = ResourceStatus::Ready;
-                }
-            } else {
-                if let Some(snapshot) = state.resources.get_mut(name) {
-                    snapshot.status = ResourceStatus::Ready;
-                }
-            }
-            
-            state::save_ref(state, state_path)?;
-            println!("  {name}: updated");
-            Ok(())
-        }
-        OperationResult::Updating { outputs } => {
-            let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-            
-            // Update the resource state
-            {
-                if let Some(snapshot) = state.resources.get_mut(name) {
-                    snapshot.properties = new_properties;
-                    snapshot.outputs = extracted;
-                }
-            }
-            
-            if requires_stop {
-                // Start the resource after successful update
-                start_resource(name, resource_type, state, registry, state_path)?;
-                // Update status to Ready after successful start
-                if let Some(snapshot) = state.resources.get_mut(name) {
-                    snapshot.status = ResourceStatus::Ready;
-                }
-            } else {
-                if let Some(snapshot) = state.resources.get_mut(name) {
-                    snapshot.status = ResourceStatus::Ready;
-                }
-            }
-            
-            state::save_ref(state, state_path)?;
-            println!("  {name}: update in progress");
-            Ok(())
+    let (outputs, msg) = match result {
+        OperationResult::Complete { outputs } | OperationResult::Updating { outputs } => {
+            (outputs, "updated")
         }
         OperationResult::InProgress { outputs } => {
-            let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-            
-            // Update the resource state
-            {
-                if let Some(snapshot) = state.resources.get_mut(name) {
-                    snapshot.properties = new_properties;
-                    snapshot.outputs = extracted;
-                    
-                    if requires_stop {
-                        // For in-progress updates that require stop, we need to handle this differently
-                        // This would typically be handled by polling in a real implementation
-                        snapshot.status = ResourceStatus::Updating;
-                    } else {
-                        snapshot.status = ResourceStatus::Ready;
-                    }
-                }
-            }
-            
-            state::save_ref(state, state_path)?;
-            println!("  {name}: update in progress");
-            Ok(())
+            (outputs, "update in progress")
         }
         OperationResult::Failed { error } => {
-            // If update failed and we stopped the server, try to restart it
             if requires_stop {
                 if let Err(start_error) = start_resource(name, resource_type, state, registry, state_path) {
                     return Err(format!("Update failed for {name}: {error}, and restart failed: {start_error}").into());
                 }
             }
-            Err(format!("Update failed for {name}: {error}").into())
+            return Err(format!("Update failed for {name}: {error}").into());
         }
+    };
+
+    let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+    if let Some(snapshot) = state.resources.get_mut(name) {
+        snapshot.properties = new_properties;
+        snapshot.outputs = extracted;
+        snapshot.status = if msg == "update in progress" && requires_stop {
+            ResourceStatus::Updating
+        } else {
+            ResourceStatus::Ready
+        };
     }
+
+    if requires_stop && msg != "update in progress" {
+        start_resource(name, resource_type, state, registry, state_path)?;
+        set_resource_status(state, name, ResourceStatus::Ready, state_path)?;
+    } else {
+        state::save_ref(state, state_path)?;
+    }
+
+    println!("  {name}: {msg}");
+    Ok(())
 }
 
 fn poll_until_ready(
@@ -532,9 +452,7 @@ fn poll_until_ready(
         std::thread::sleep(poll_interval);
 
         if start.elapsed() > timeout {
-            let snap = state.resources.get_mut(name).unwrap();
-            snap.status = ResourceStatus::Failed;
-            state::save_ref(state, state_path)?;
+            set_resource_status(state, name, ResourceStatus::Failed, state_path)?;
             return Err(format!("{name}: timed out waiting for resource to be ready").into());
         }
 
@@ -551,22 +469,13 @@ fn poll_until_ready(
                 println!("  {name}: ready");
                 return Ok(());
             }
-            OperationResult::InProgress { outputs } => {
+            OperationResult::InProgress { outputs } | OperationResult::Updating { outputs } => {
                 let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-                let snap = state.resources.get_mut(name).unwrap();
-                snap.outputs = extracted;
-                state::save_ref(state, state_path)?;
-            }
-            OperationResult::Updating { outputs } => {
-                let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-                let snap = state.resources.get_mut(name).unwrap();
-                snap.outputs = extracted;
+                state.resources.get_mut(name).unwrap().outputs = extracted;
                 state::save_ref(state, state_path)?;
             }
             OperationResult::Failed { error } => {
-                let snap = state.resources.get_mut(name).unwrap();
-                snap.status = ResourceStatus::Failed;
-                state::save_ref(state, state_path)?;
+                set_resource_status(state, name, ResourceStatus::Failed, state_path)?;
                 return Err(format!("{name}: {error}").into());
             }
         }
