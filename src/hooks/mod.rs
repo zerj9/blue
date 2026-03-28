@@ -7,6 +7,8 @@ use crate::state::State;
 use serde_json::Value;
 use std::time::Duration;
 
+// TODO: HookContext clones the full State for every hook invocation.
+// Accept a reference or pre-serialized JSON instead.
 pub struct HookContext {
     pub state: State,
     pub resource_type: String,
@@ -42,53 +44,85 @@ pub async fn execute_hook_with_validation(
     // Create context object for the hook
     let context_json = context.filter_sensitive_data().to_string();
     
+    // Read the script file
+    let script_code = std::fs::read_to_string(&hook.script)
+        .map_err(|e| format!("Failed to read hook script '{}': {}", hook.script, e))?;
+
     // Prepare the script with context injection
     let full_script = format!(
         "const context = {};\n{}",
         context_json,
-        hook.script
+        script_code
     );
     
     // Execute with timeout
-    let output = runtime.execute_script(&full_script, timeout).await?;
-    
-    // Parse output as JSON
-    let output_value: Value = match serde_json::from_str(&output) {
-        Ok(v) => v,
-        Err(e) => return Err(format!("Hook output is not valid JSON: {}", e)),
-    };
-    
+    let log_prefix = format!("{}.{}:{}", context.resource_type, context.resource_name, hook.event);
+    let output_value = runtime.execute_script(&full_script, &log_prefix, timeout).await?;
+
     // Validate against schema if outputs are declared
     if !hook.outputs.is_empty() {
         validate_hook_outputs(&output_value, &hook.outputs)?;
     }
-    
+
     Ok(output_value)
 }
 
-/// Execute a single hook without validation (for simple cases)
-pub async fn execute_hook(
-    hook_type: &str,
-    script: &str,
-    context: HookContext,
-    timeout: Duration,
-) -> Result<String, String> {
-    let runtime = runtime::HookRuntime::new();
-    
-    // Create context object for the hook
-    let context_json = context.filter_sensitive_data().to_string();
-    
-    // Prepare the script with context injection
-    let full_script = format!(
-        "const context = {};\n{}",
-        context_json,
-        script
-    );
-    
-    // Execute with timeout
-    let output = runtime.execute_script(&full_script, timeout).await?;
-    
-    Ok(output)
+/// Execute all hooks for a data source and insert outputs into the registry.
+pub fn execute_data_hooks(
+    hooks: &[crate::config::Hook],
+    name: &str,
+    output_registry: &mut crate::reference::OutputRegistry,
+) -> Result<(), String> {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    for hook in hooks {
+        let context = HookContext::new(
+            State { version: 1, serial: 0, data: std::collections::HashMap::new(), resources: std::collections::HashMap::new() },
+            "data".to_string(),
+            name.to_string(),
+        );
+        let output = rt.block_on(execute_hook_with_validation(hook, context, Duration::from_secs(10)))
+            .map_err(|e| format!("data.{name}: {e}"))?;
+        insert_hook_outputs(output_registry, "data", name, &output);
+    }
+    Ok(())
+}
+
+/// Execute plan-safe hooks for a resource and insert outputs into the registry.
+pub fn execute_safe_resource_hooks(
+    hooks: &[crate::config::Hook],
+    name: &str,
+    output_registry: &mut crate::reference::OutputRegistry,
+) -> Result<(), String> {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    for hook in hooks {
+        match hook.event.as_str() {
+            "before_create" | "before_update" => {
+                let context = HookContext::new(
+                    State { version: 1, serial: 0, data: std::collections::HashMap::new(), resources: std::collections::HashMap::new() },
+                    "resource".to_string(),
+                    name.to_string(),
+                );
+                let output = rt.block_on(execute_hook_with_validation(hook, context, Duration::from_secs(10)))
+                    .map_err(|e| format!("resources.{name}: {e}"))?;
+                insert_hook_outputs(output_registry, "resources", name, &output);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn insert_hook_outputs(
+    registry: &mut crate::reference::OutputRegistry,
+    source: &str,
+    name: &str,
+    output: &Value,
+) {
+    if let Some(obj) = output.as_object() {
+        for (k, v) in obj {
+            registry.insert(source, name, &format!("hooks.outputs.{k}"), v.clone());
+        }
+    }
 }
 
 /// Validate hook outputs against declared schema
@@ -96,15 +130,8 @@ pub fn validate_hook_outputs(
     outputs: &Value,
     expected_outputs: &[crate::config::HookOutput],
 ) -> Result<(), String> {
-    // Parse the output string as JSON
-    let output_value: Value = match serde_json::from_str(&outputs.to_string()) {
-        Ok(v) => v,
-        Err(e) => return Err(format!("Invalid JSON output: {}", e)),
-    };
-    
-    // Check each expected output
     for expected in expected_outputs {
-        let actual = output_value.get(&expected.name)
+        let actual = outputs.get(&expected.name)
             .ok_or_else(|| format!("Missing required output: {}", expected.name))?;
         
         // Validate type matches

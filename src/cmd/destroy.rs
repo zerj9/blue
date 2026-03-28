@@ -55,7 +55,7 @@ pub fn run(args: &DestroyArgs) {
         }
     };
 
-    let order = match graph.topological_sort() {
+    let order = match graph.topological_sort_names() {
         Ok(o) => o,
         Err(e) => {
             eprintln!("Error: {e}");

@@ -7,14 +7,13 @@ pub mod validate;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::{config, provider, providers, state};
+use crate::{config, graph, hooks, provider, providers, reference, schema, state};
 
 pub(crate) struct ResolvedConfig {
     pub config: config::Config,
-    pub data_sources: HashMap<String, config::DataSource>,
-    pub data_vars: HashMap<String, serde_json::Value>,
+    pub graph: graph::DependencyGraph,
+    pub output_registry: reference::OutputRegistry,
     pub registry: provider::ProviderRegistry,
-    pub hook_registry: config::HookRegistry,
 }
 
 pub(crate) fn resolve_config(
@@ -32,29 +31,11 @@ pub(crate) fn resolve_config(
         }
     };
 
-    let data_sources = match config::extract_data_sources(&raw) {
-        Ok(ds) => ds,
-        Err(e) => {
-            eprintln!("Error: failed to parse data sources: {e}");
-            std::process::exit(1);
-        }
+    let config_dir = match file.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
     };
-
-    let mut registry = providers::build_registry(provider::ProviderMode::Live);
-
-    let data_vars = if data_sources.is_empty() {
-        HashMap::new()
-    } else {
-        match registry.resolve_data_sources(&data_sources) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("Error: failed to resolve data sources: {e}");
-                std::process::exit(1);
-            }
-        }
-    };
-
-    let config = match config::load(&raw, &cli_vars, &data_vars) {
+    let config = match config::load(&raw, &cli_vars, config_dir) {
         Ok(config) => config,
         Err(e) => {
             eprintln!("Error: failed to parse {}: {e}", file.display());
@@ -62,20 +43,112 @@ pub(crate) fn resolve_config(
         }
     };
 
-    if !config.resources.is_empty()
-        && let Err(e) = registry.validate_resources(&config.resources)
-    {
+    let dep_graph = match graph::DependencyGraph::build(&config.data, &config.resources) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("Error: failed to build dependency graph: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let registry = providers::build_registry(provider::ProviderMode::Live);
+
+    if !config.resources.is_empty() {
+        let mut schema_registry = providers::build_registry(provider::ProviderMode::SchemaOnly);
+        if let Err(e) = schema_registry.validate_resources(&config.resources) {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    let output_registry = reference::OutputRegistry::new();
+
+    ResolvedConfig {
+        config,
+        graph: dep_graph,
+        output_registry,
+        registry,
+    }
+}
+
+/// Walk the dependency graph in topological order, resolving data sources
+/// and executing hooks just-in-time. Populates the output registry.
+pub(crate) fn resolve_graph(resolved: &mut ResolvedConfig) {
+    let order = match resolved.graph.topological_sort() {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    for (name, kind) in &order {
+        match kind {
+            graph::NodeKind::Data => {
+                resolve_data_node(name, resolved);
+            }
+            graph::NodeKind::Resource => {
+                resolve_resource_hooks(name, resolved);
+            }
+        }
+    }
+}
+
+fn resolve_data_node(name: &str, resolved: &mut ResolvedConfig) {
+    let source = match resolved.config.data.get(name) {
+        Some(s) => s,
+        None => return,
+    };
+
+    let (provider_name, data_type) = match source.provider_and_type() {
+        Ok(pt) => pt,
+        Err(e) => {
+            eprintln!("Error: data.{name}: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let filters = match serde_json::to_value(&source.filters) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Error: data.{name}: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let raw_value = match resolved.registry.resolve_single_data_source(provider_name, data_type, filters) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Error: data.{name}: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Extract schema outputs and insert into registry
+    let provider_schema = resolved.registry.data_source_schema_for(provider_name, data_type);
+    if let Some(s) = provider_schema {
+        if let Ok(extracted) = schema::extract_outputs(&raw_value, &s.outputs) {
+            resolved.output_registry.insert_outputs("data", name, &extracted);
+        }
+    }
+
+    let hooks_list: Vec<config::Hook> = source.hooks.clone();
+    if let Err(e) = hooks::execute_data_hooks(&hooks_list, name, &mut resolved.output_registry) {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
+}
 
-    let hook_registry = config.hook_registry.clone();
-    ResolvedConfig {
-        config,
-        data_sources,
-        data_vars,
-        registry,
-        hook_registry,
+fn resolve_resource_hooks(name: &str, resolved: &mut ResolvedConfig) {
+    let resource = match resolved.config.resources.get(name) {
+        Some(r) => r,
+        None => return,
+    };
+
+    let hooks_list: Vec<config::Hook> = resource.hooks.clone();
+    if let Err(e) = hooks::execute_safe_resource_hooks(&hooks_list, name, &mut resolved.output_registry) {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
     }
 }
 
@@ -118,10 +191,13 @@ pub(crate) fn compute_changeset(
     old_state: &state::State,
     resolved: &mut ResolvedConfig,
 ) -> state::Changeset {
-    let data_snapshots = state::snapshot_data(&resolved.data_sources, &resolved.data_vars);
+    let data_vars = resolved.output_registry.to_data_vars();
+    let data_snapshots = state::snapshot_data(&resolved.config.data, &data_vars);
     let data_changes = state::diff_data(&old_state.data, &data_snapshots);
 
-    let resource_snapshots = state::snapshot_resources(&resolved.config.resources);
+    // Resolve resource properties using the output registry before snapshotting
+    let resource_snapshots =
+        state::snapshot_resources_resolved(&resolved.config.resources, &resolved.output_registry);
     let resource_changes = match state::diff_resources(
         &old_state.resources,
         &resource_snapshots,

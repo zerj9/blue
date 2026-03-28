@@ -32,26 +32,13 @@ pub fn run(args: &ValidateArgs) {
         }
     };
 
-    let data_sources = match config::extract_data_sources(&raw) {
-        Ok(ds) => ds,
-        Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        }
+    // Load config (resolves and validates hook script paths)
+    let file_path = match args.file.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
     };
-
-    // Validate data source hooks
-    let file_path = args.file.parent().unwrap_or_else(|| Path::new(""));
-    for (name, source) in &data_sources {
-        if let Err(e) = config::validate_hooks(&source.hooks, file_path.to_str().unwrap_or("."), false) {
-            eprintln!("Error: data.{name}: {e}");
-            std::process::exit(1);
-        }
-    }
-
-    // Load config deferring both data and resource references
     let cli_vars = build_cli_vars(&args.var, args.var_file.as_deref());
-    let config = match config::load_for_validation(&raw, &cli_vars) {
+    let config = match config::load_for_validation(&raw, &cli_vars, file_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error: {e}");
@@ -59,9 +46,18 @@ pub fn run(args: &ValidateArgs) {
         }
     };
 
+    // Validate data source hooks
+    let data_sources = &config.data;
+    for (name, source) in data_sources {
+        if let Err(e) = config::validate_hooks(&source.hooks, false) {
+            eprintln!("Error: data.{name}: {e}");
+            std::process::exit(1);
+        }
+    }
+
     // Validate resource hooks
     for (name, resource) in &config.resources {
-        if let Err(e) = config::validate_hooks(&resource.hooks, file_path.to_str().unwrap_or("."), true) {
+        if let Err(e) = config::validate_hooks(&resource.hooks, true) {
             eprintln!("Error: resources.{name}: {e}");
             std::process::exit(1);
         }
@@ -89,7 +85,7 @@ pub fn run(args: &ValidateArgs) {
 
     // Build data_schemas map
     let mut data_schemas = HashMap::new();
-    for (name, source) in &data_sources {
+    for (name, source) in data_sources {
         let full_type = source.source_type();
         match registry.data_source_schema_ref(full_type) {
             Ok(Some(s)) => {
@@ -133,10 +129,33 @@ pub fn run(args: &ValidateArgs) {
         }
     }
 
+    // Build hook output maps for validation
+    let mut data_hook_outputs: HashMap<String, Vec<&config::HookOutput>> = HashMap::new();
+    for (name, source) in data_sources {
+        let outputs: Vec<&config::HookOutput> = source.hooks.iter()
+            .flat_map(|h| h.outputs.iter())
+            .collect();
+        if !outputs.is_empty() {
+            data_hook_outputs.insert(name.clone(), outputs);
+        }
+    }
+
+    let mut resource_hook_outputs: HashMap<String, Vec<&config::HookOutput>> = HashMap::new();
+    for (name, resource) in &config.resources {
+        let outputs: Vec<&config::HookOutput> = resource.hooks.iter()
+            .flat_map(|h| h.outputs.iter())
+            .collect();
+        if !outputs.is_empty() {
+            resource_hook_outputs.insert(name.clone(), outputs);
+        }
+    }
+
     // Validate with reference awareness
     let ctx = schema::ValidateContext {
         data_schemas,
         resource_schemas,
+        data_hook_outputs,
+        resource_hook_outputs,
     };
 
     let mut errors = Vec::new();

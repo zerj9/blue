@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::config;
 use crate::graph::DependencyGraph;
 use crate::provider::{OperationResult, ProviderRegistry};
+use crate::reference::{OutputRegistry, Ref};
 use crate::schema;
 use crate::state::{self, PropertyChange, ResourceSnapshot, ResourceStatus, State};
 
@@ -17,7 +17,7 @@ pub fn execute(
     state.data = changeset.data_snapshots.clone();
 
     let graph = DependencyGraph::build_from_snapshots(&changeset.resource_snapshots)?;
-    let order = graph.topological_sort()?;
+    let order = graph.topological_sort_names()?;
 
     // Collect changes by name for lookup
     let changes_by_name: HashMap<&str, &state::ResourceChange> = changeset
@@ -108,16 +108,21 @@ fn create_resource(
     registry: &mut ProviderRegistry,
     state_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Resolve resource references in properties
-    let resource_outputs: HashMap<String, serde_json::Value> = state
-        .resources
-        .iter()
-        .filter(|(_, snap)| snap.status == ResourceStatus::Ready)
-        .map(|(n, snap)| (n.clone(), snap.outputs.clone()))
-        .collect();
+    // Build output registry from ready resources for ref resolution
+    let mut output_reg = OutputRegistry::new();
+    for (n, snap) in &state.resources {
+        if snap.status == ResourceStatus::Ready {
+            if let Some(obj) = snap.outputs.as_object() {
+                for (k, v) in obj {
+                    output_reg.insert("resources", n, k, v.clone());
+                }
+            }
+        }
+    }
 
     let props_str = properties.to_string();
-    let resolved_str = config::resolve_resource_refs(&props_str, &resource_outputs)?;
+    let resolved_str = Ref::resolve_all(&props_str, &output_reg)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let resolved_props: serde_json::Value = serde_json::from_str(&resolved_str)?;
 
     println!("Creating {name} ({resource_type})...");
@@ -365,16 +370,21 @@ fn update_resource(
         }
     }
 
-    // Resolve resource references in the new properties
-    let resource_outputs: HashMap<String, serde_json::Value> = state
-        .resources
-        .iter()
-        .filter(|(_, snap)| snap.status == ResourceStatus::Ready)
-        .map(|(n, snap)| (n.clone(), snap.outputs.clone()))
-        .collect();
+    // Build output registry from ready resources for ref resolution
+    let mut output_reg = OutputRegistry::new();
+    for (n, snap) in state.resources.iter() {
+        if snap.status == ResourceStatus::Ready {
+            if let Some(obj) = snap.outputs.as_object() {
+                for (k, v) in obj {
+                    output_reg.insert("resources", n, k, v.clone());
+                }
+            }
+        }
+    }
 
     let props_str = new_properties.to_string();
-    let resolved_str = config::resolve_resource_refs(&props_str, &resource_outputs)?;
+    let resolved_str = Ref::resolve_all(&props_str, &output_reg)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let resolved_props: serde_json::Value = serde_json::from_str(&resolved_str)?;
 
     if requires_stop {

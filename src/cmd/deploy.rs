@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 
-use super::{compute_changeset, print_changeset, print_config, print_var_info, resolve_config};
+use super::{compute_changeset, print_changeset, print_config, print_var_info, resolve_config, resolve_graph};
 use crate::{deploy, provider, providers, state};
 
 #[derive(Args)]
@@ -73,6 +73,7 @@ pub fn run(args: &DeployArgs) {
 
         let mut resolved = resolve_config(file, &args.var, args.var_file.as_deref());
         print_config(&resolved.config);
+        resolve_graph(&mut resolved);
 
         let cs = compute_changeset(&old_state, &mut resolved);
         (cs, resolved.registry)

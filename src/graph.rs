@@ -1,108 +1,125 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::HashMap;
+
+use petgraph::algo::toposort;
+use petgraph::graph::{DiGraph, NodeIndex};
 
 use crate::config;
+use crate::reference::Ref;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NodeKind {
+    Data,
+    Resource,
+}
 
 pub struct DependencyGraph {
-    edges: BTreeMap<String, BTreeSet<String>>, // resource -> depends on
+    graph: DiGraph<(String, NodeKind), ()>,
+    node_indices: HashMap<String, NodeIndex>,
 }
 
 impl DependencyGraph {
-    pub fn build_from_snapshots(
-        snapshots: &HashMap<String, crate::state::ResourceSnapshot>,
+    /// Build a unified graph from data sources and resources.
+    /// Edges are derived from `{{...}}` refs in properties and filters.
+    pub fn build(
+        data_sources: &HashMap<String, config::DataSource>,
+        resources: &HashMap<String, config::Resource>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut edges: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut graph = DiGraph::new();
+        let mut node_indices = HashMap::new();
 
-        for (name, snap) in snapshots {
-            edges.entry(name.clone()).or_default();
-            let text = snap.properties.to_string();
-            let refs = config::extract_resource_refs(&text);
-            for (dep_name, _field) in refs {
-                if !snapshots.contains_key(&dep_name) {
-                    return Err(format!(
-                        "resource '{name}' references unknown resource '{dep_name}'"
-                    )
-                    .into());
-                }
-                edges.entry(name.clone()).or_default().insert(dep_name);
-            }
+        // Add data sources as nodes
+        for name in data_sources.keys() {
+            let idx = graph.add_node((name.clone(), NodeKind::Data));
+            node_indices.insert(name.clone(), idx);
         }
 
-        Ok(Self { edges })
-    }
-
-    pub fn topological_sort(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        // Kahn's algorithm
-        let mut in_degree: HashMap<&str, usize> = HashMap::new();
-        for node in self.edges.keys() {
-            in_degree.entry(node).or_insert(0);
-        }
-        for deps in self.edges.values() {
-            for dep in deps {
-                *in_degree.entry(dep).or_insert(0) += 1;
-            }
+        // Add resources as nodes
+        for name in resources.keys() {
+            let idx = graph.add_node((name.clone(), NodeKind::Resource));
+            node_indices.insert(name.clone(), idx);
         }
 
-        // Note: in_degree counts how many nodes depend ON this node.
-        // Wait — Kahn's needs the reverse: in_degree = number of dependencies a node has.
-        // Let me redo this. edges[A] = {B} means A depends on B. So B must come before A.
-        // In a standard DAG for Kahn's: in_degree[A] = number of nodes A depends on = edges[A].len()
-
-        let mut in_degree: HashMap<&str, usize> = HashMap::new();
-        for (node, deps) in &self.edges {
-            in_degree.entry(node.as_str()).or_insert(0);
-            for dep in deps {
-                in_degree.entry(dep.as_str()).or_insert(0);
-            }
-        }
-        for (node, deps) in &self.edges {
-            *in_degree.get_mut(node.as_str()).unwrap() = deps.len();
-        }
-
-        let mut queue: VecDeque<String> = VecDeque::new();
-        for (node, &deg) in &in_degree {
-            if deg == 0 {
-                queue.push_back(node.to_string());
-            }
-        }
-
-        // Sort queue for deterministic ordering
-        let mut sorted_queue: Vec<String> = queue.into_iter().collect();
-        sorted_queue.sort();
-        queue = sorted_queue.into_iter().collect();
-
-        let mut order = Vec::new();
-        while let Some(node) = queue.pop_front() {
-            order.push(node.clone());
-            // Find all nodes that depend on this node and reduce their in_degree
-            for (dependent, deps) in &self.edges {
-                if deps.contains(&node) {
-                    let deg = in_degree.get_mut(dependent.as_str()).unwrap();
-                    *deg -= 1;
-                    if *deg == 0 {
-                        // Insert in sorted position to maintain deterministic ordering
-                        let insert_pos = queue
-                            .iter()
-                            .position(|x| x > dependent)
-                            .unwrap_or(queue.len());
-                        queue.insert(insert_pos, dependent.clone());
+        // Add edges from resource property refs
+        for (name, resource) in resources {
+            if let Some(props) = &resource.properties {
+                let text = props.to_string();
+                for r in Ref::parse_all(&text) {
+                    let dep_name = r.target();
+                    match node_indices.get(dep_name) {
+                        Some(&from) => {
+                            let to = node_indices[name];
+                            if from != to {
+                                graph.add_edge(from, to, ());
+                            }
+                        }
+                        None => {
+                            return Err(format!(
+                                "resource '{name}' references unknown node '{dep_name}'"
+                            )
+                            .into());
+                        }
                     }
                 }
             }
         }
 
-        if order.len() != in_degree.len() {
-            let remaining: Vec<&str> = in_degree
-                .iter()
-                .filter(|(_, deg)| **deg > 0)
-                .map(|(&node, _)| node)
-                .collect();
-            return Err(format!(
-                "dependency cycle detected among resources: {}",
-                remaining.join(", ")
-            )
-            .into());
+        Ok(Self {
+            graph,
+            node_indices,
+        })
+    }
+
+    /// Build from resource snapshots only (used by destroy and deploy-from-plan).
+    pub fn build_from_snapshots(
+        snapshots: &HashMap<String, crate::state::ResourceSnapshot>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut graph = DiGraph::new();
+        let mut node_indices = HashMap::new();
+
+        for name in snapshots.keys() {
+            let idx = graph.add_node((name.clone(), NodeKind::Resource));
+            node_indices.insert(name.clone(), idx);
         }
 
-        Ok(order)
+        for (name, snap) in snapshots {
+            let text = snap.properties.to_string();
+            for r in Ref::parse_all(&text) {
+                let dep_name = r.target().to_string();
+                if let Some(&from) = node_indices.get(&dep_name) {
+                    let to = node_indices[name];
+                    if from != to {
+                        graph.add_edge(from, to, ());
+                    }
+                }
+                // Skip refs to unknown nodes (data sources not in snapshots)
+            }
+        }
+
+        Ok(Self {
+            graph,
+            node_indices,
+        })
+    }
+
+    /// Topological sort returning (name, kind) pairs.
+    pub fn topological_sort(&self) -> Result<Vec<(String, NodeKind)>, Box<dyn std::error::Error>> {
+        let sorted = toposort(&self.graph, None).map_err(|cycle| {
+            let (node_name, _) = &self.graph[cycle.node_id()];
+            format!("dependency cycle detected involving '{node_name}'")
+        })?;
+
+        Ok(sorted
+            .into_iter()
+            .map(|idx| self.graph[idx].clone())
+            .collect())
+    }
+
+    /// Topological sort returning just names (backward compat).
+    pub fn topological_sort_names(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        Ok(self
+            .topological_sort()?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect())
     }
 }

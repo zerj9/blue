@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::config;
-use crate::schema::{self, Schema};
+use crate::schema::Schema;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProviderMode {
@@ -87,33 +87,6 @@ impl ProviderRegistry {
         Ok(self.providers.get(name).unwrap().as_ref())
     }
 
-    pub fn resolve_data_sources(
-        &mut self,
-        sources: &HashMap<String, config::DataSource>,
-    ) -> Result<HashMap<String, serde_json::Value>, Box<dyn std::error::Error>> {
-        let mut vars = HashMap::new();
-        for (name, source) in sources {
-            let (provider_name, data_type) = source.provider_and_type()?;
-            let provider = self
-                .get_or_init(provider_name)
-                .map_err(|e| format!("data.{name}: {e}"))?;
-            let filters =
-                serde_json::to_value(&source.filters).map_err(|e| format!("data.{name}: {e}"))?;
-            let raw_value = provider
-                .resolve_data_source(data_type, filters)
-                .map_err(|e| format!("data.{name}: {e}"))?;
-            let schema = provider.data_source_schema(data_type);
-            let extracted = match schema {
-                Some(s) => schema::extract_outputs(&raw_value, &s.outputs)?,
-                None => HashMap::new(),
-            };
-            for (key, value) in extracted {
-                vars.insert(format!("data.{name}.{key}"), value);
-            }
-        }
-        Ok(vars)
-    }
-
     pub fn create_resource(
         &mut self,
         full_type: &str,
@@ -162,6 +135,25 @@ impl ProviderRegistry {
         let (provider_name, resource_type) = config::split_provider_type(full_type)?;
         let provider = self.get_or_init(provider_name)?;
         Ok(provider.resource_schema(resource_type))
+    }
+
+    pub fn resolve_single_data_source(
+        &mut self,
+        provider_name: &str,
+        data_type: &str,
+        filters: serde_json::Value,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+        let provider = self.get_or_init(provider_name)?;
+        provider.resolve_data_source(data_type, filters)
+    }
+
+    pub fn data_source_schema_for(
+        &mut self,
+        provider_name: &str,
+        data_type: &str,
+    ) -> Option<&Schema> {
+        let provider = self.get_or_init(provider_name).ok()?;
+        provider.data_source_schema(data_type)
     }
 
     pub fn ensure_providers(&mut self, names: &[&str]) -> Result<(), Box<dyn std::error::Error>> {

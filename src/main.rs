@@ -5,6 +5,7 @@ mod graph;
 mod hooks;
 mod provider;
 mod providers;
+mod reference;
 mod schema;
 mod state;
 

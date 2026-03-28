@@ -247,95 +247,6 @@ pub fn snapshot_data(
     snapshots
 }
 
-/// Execute safe hooks during planning and return hook outputs
-pub async fn execute_plan_hooks(
-    hook_registry: &crate::config::HookRegistry,
-    state: &State,
-) -> HashMap<String, serde_json::Value> {
-    use crate::hooks::{HookContext, execute_hook_with_validation};
-    use std::time::Duration;
-
-    let mut plan_outputs = HashMap::new();
-
-    // Execute data source hooks
-    for (data_name, hooks) in &hook_registry.data_hooks {
-        for hook in hooks {
-            match hook.event.as_str() {
-                // Safe to run during plan
-                "before_read" | "after_read" => {
-                    let context =
-                        HookContext::new(state.clone(), "data".to_string(), data_name.to_string());
-
-                    match execute_hook_with_validation(hook, context, Duration::from_secs(10)).await
-                    {
-                        Ok(output) => {
-                            plan_outputs
-                                .insert(format!("data.{}.hooks.outputs", data_name), output);
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "Warning: Hook execution failed during plan for data.{}: {}",
-                                data_name, e
-                            );
-                        }
-                    }
-                }
-                // Unsafe during plan
-                _ => {
-                    eprintln!(
-                        "Warning: Skipping {} hook during plan (will run during deploy)",
-                        hook.event
-                    );
-                }
-            }
-        }
-    }
-
-    // Execute resource hooks (only safe ones)
-    for (resource_name, hooks) in &hook_registry.resource_hooks {
-        for hook in hooks {
-            match hook.event.as_str() {
-                // Safe to run during plan
-                "before_create" | "before_update" => {
-                    let context = HookContext::new(
-                        state.clone(),
-                        "resource".to_string(),
-                        resource_name.to_string(),
-                    );
-
-                    match execute_hook_with_validation(hook, context, Duration::from_secs(10)).await
-                    {
-                        Ok(output) => {
-                            plan_outputs.insert(
-                                format!("resources.{}.hooks.outputs", resource_name),
-                                output,
-                            );
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "Warning: Hook execution failed during plan for resources.{}: {}",
-                                resource_name, e
-                            );
-                        }
-                    }
-                }
-                // Unsafe during plan
-                "after_create" | "after_update" | "before_delete" | "after_delete" => {
-                    eprintln!(
-                        "Warning: Skipping {} hook during plan (will run during deploy)",
-                        hook.event
-                    );
-                }
-                _ => {
-                    eprintln!("Warning: Unknown hook event '{}' during plan", hook.event);
-                }
-            }
-        }
-    }
-
-    plan_outputs
-}
-
 pub fn diff_data(
     old: &HashMap<String, DataSnapshot>,
     new: &HashMap<String, DataSnapshot>,
@@ -401,13 +312,24 @@ pub fn diff_data(
     changes
 }
 
-pub fn snapshot_resources(
+pub fn snapshot_resources_resolved(
     resources: &HashMap<String, config::Resource>,
+    output_registry: &crate::reference::OutputRegistry,
 ) -> HashMap<String, ResourceSnapshot> {
+    use crate::reference::Ref;
+
     let mut snapshots = HashMap::new();
     for (name, resource) in resources {
         let properties = match &resource.properties {
-            Some(props) => toml_to_json(props),
+            Some(props) => {
+                let json = toml_to_json(props);
+                // Resolve any {{...}} refs in the serialized properties
+                let text = json.to_string();
+                match Ref::resolve_all(&text, output_registry) {
+                    Ok(resolved) => serde_json::from_str(&resolved).unwrap_or(json),
+                    Err(_) => json, // Fall back to unresolved if resolution fails
+                }
+            }
             None => serde_json::Value::Object(Default::default()),
         };
         snapshots.insert(
