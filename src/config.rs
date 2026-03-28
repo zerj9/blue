@@ -2,7 +2,6 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct Hook {
     pub event: String,
@@ -167,9 +166,16 @@ fn interpolate(
 }
 
 /// Resolve all hook script paths to absolute paths within the config directory.
-fn resolve_hook_paths(config: &mut Config, config_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let canonical_dir = config_dir.canonicalize()
-        .map_err(|e| format!("failed to canonicalize config directory '{}': {e}", config_dir.display()))?;
+fn resolve_hook_paths(
+    config: &mut Config,
+    config_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let canonical_dir = config_dir.canonicalize().map_err(|e| {
+        format!(
+            "failed to canonicalize config directory '{}': {e}",
+            config_dir.display()
+        )
+    })?;
 
     let mut all_hooks: Vec<(&str, &mut Hook)> = Vec::new();
     for (name, source) in &mut config.data {
@@ -185,15 +191,20 @@ fn resolve_hook_paths(config: &mut Config, config_dir: &Path) -> Result<(), Box<
 
     for (name, hook) in all_hooks {
         let script_path = config_dir.join(&hook.script);
-        let canonical_script = script_path.canonicalize()
-            .map_err(|e| format!("{name}: hook script not found '{}': {e}", script_path.display()))?;
+        let canonical_script = script_path.canonicalize().map_err(|e| {
+            format!(
+                "{name}: hook script not found '{}': {e}",
+                script_path.display()
+            )
+        })?;
 
         if !canonical_script.starts_with(&canonical_dir) {
             return Err(format!(
                 "{name}: hook script '{}' escapes config directory '{}'",
                 hook.script,
                 config_dir.display()
-            ).into());
+            )
+            .into());
         }
 
         hook.script = canonical_script.to_string_lossy().to_string();
@@ -203,11 +214,15 @@ fn resolve_hook_paths(config: &mut Config, config_dir: &Path) -> Result<(), Box<
 }
 
 /// Validate hook configurations (script paths must already be resolved).
-pub fn validate_hooks(
-    hooks: &[Hook],
-    is_resource: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let valid_resource_events: &[&str] = &["before_create", "after_create", "before_update", "after_update", "before_delete", "after_delete"];
+pub fn validate_hooks(hooks: &[Hook], is_resource: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let valid_resource_events: &[&str] = &[
+        "before_create",
+        "after_create",
+        "before_update",
+        "after_update",
+        "before_delete",
+        "after_delete",
+    ];
     let valid_data_events: &[&str] = &["before_read", "after_read"];
 
     for hook in hooks {
@@ -222,7 +237,8 @@ pub fn validate_hooks(
                 "Invalid hook event '{}'. Valid events for this type: {}",
                 hook.event,
                 valid_events.join(", ")
-            ).into());
+            )
+            .into());
         }
 
         // Script path is already resolved and validated by resolve_hook_paths
@@ -238,7 +254,8 @@ pub fn validate_hooks(
                     "Invalid output type '{}' in hook. Valid types: {}",
                     output.r#type,
                     valid_types.join(", ")
-                ).into());
+                )
+                .into());
             }
         }
     }

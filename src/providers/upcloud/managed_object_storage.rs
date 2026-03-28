@@ -54,10 +54,8 @@ pub fn resolve_regions(
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let filter_map: HashMap<String, String> = serde_json::from_value(filters)?;
     let regions = list_regions(client)?;
-    let matched: Vec<&serde_json::Value> = regions
-        .iter()
-        .filter(|r| matches(r, &filter_map))
-        .collect();
+    let matched: Vec<&serde_json::Value> =
+        regions.iter().filter(|r| matches(r, &filter_map)).collect();
 
     match matched.len() {
         0 => Err(format!("no regions matched filters: {:?}", filter_map).into()),
@@ -66,7 +64,10 @@ pub fn resolve_regions(
             let mut msg = format!("{n} regions matched, expected exactly 1\n");
             for r in &matched {
                 let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                let primary_zone = r.get("primary_zone").and_then(|v| v.as_str()).unwrap_or("?");
+                let primary_zone = r
+                    .get("primary_zone")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 msg.push_str(&format!("  - {name} (primary_zone: {primary_zone})\n"));
             }
             Err(msg.into())

@@ -64,7 +64,9 @@ impl Provider for Client {
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         match data_type {
             "storage" => storage::resolve(self, filters),
-            "managed_object_storage_regions" => managed_object_storage::resolve_regions(self, filters),
+            "managed_object_storage_regions" => {
+                managed_object_storage::resolve_regions(self, filters)
+            }
             other => Err(format!("unknown upcloud data source type: {other}").into()),
         }
     }

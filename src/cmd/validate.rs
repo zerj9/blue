@@ -132,9 +132,8 @@ pub fn run(args: &ValidateArgs) {
     // Build hook output maps for validation
     let mut data_hook_outputs: HashMap<String, Vec<&config::HookOutput>> = HashMap::new();
     for (name, source) in data_sources {
-        let outputs: Vec<&config::HookOutput> = source.hooks.iter()
-            .flat_map(|h| h.outputs.iter())
-            .collect();
+        let outputs: Vec<&config::HookOutput> =
+            source.hooks.iter().flat_map(|h| h.outputs.iter()).collect();
         if !outputs.is_empty() {
             data_hook_outputs.insert(name.clone(), outputs);
         }
@@ -142,7 +141,9 @@ pub fn run(args: &ValidateArgs) {
 
     let mut resource_hook_outputs: HashMap<String, Vec<&config::HookOutput>> = HashMap::new();
     for (name, resource) in &config.resources {
-        let outputs: Vec<&config::HookOutput> = resource.hooks.iter()
+        let outputs: Vec<&config::HookOutput> = resource
+            .hooks
+            .iter()
             .flat_map(|h| h.outputs.iter())
             .collect();
         if !outputs.is_empty() {

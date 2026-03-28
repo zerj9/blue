@@ -338,13 +338,14 @@ pub fn update(
     }
 
     if let Some(video_model) = new_properties.get("video_model").and_then(|v| v.as_str()) {
-        update_request["server"]["video_model"] = serde_json::Value::String(video_model.to_string());
+        update_request["server"]["video_model"] =
+            serde_json::Value::String(video_model.to_string());
     }
 
     // Complex updates that may require server to be stopped
     // These are commented out for now as they require more complex handling
     // and state checking
-    
+
     /*
     if let Some(core_number) = new_properties.get("core_number") {
         update_request["server"]["core_number"] = core_number.clone();
@@ -376,13 +377,14 @@ pub fn update(
         .map_err(|e| format!("failed to parse server update response: {e}"))?;
 
     // Extract the updated server information
-    let server_info = body.get("server")
+    let server_info = body
+        .get("server")
         .and_then(|s| s.as_object())
         .ok_or_else(|| "unexpected server update response: expected server object")?;
 
     // Return the updated outputs
     let mut outputs = old_outputs.clone();
-    
+
     // Update the fields that were changed
     if let Some(title) = server_info.get("title").and_then(|v| v.as_str()) {
         outputs["title"] = serde_json::Value::String(title.to_string());

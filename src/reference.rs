@@ -88,10 +88,7 @@ impl Ref {
 
     /// Resolve all `{{...}}` references in text using the output registry.
     /// Non-ref placeholders (e.g. parameters) are left as-is.
-    pub fn resolve_all(
-        text: &str,
-        registry: &OutputRegistry,
-    ) -> Result<String, String> {
+    pub fn resolve_all(text: &str, registry: &OutputRegistry) -> Result<String, String> {
         let mut result = String::with_capacity(text.len());
         let mut rest = text;
 

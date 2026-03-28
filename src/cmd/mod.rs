@@ -116,19 +116,27 @@ fn resolve_data_node(name: &str, resolved: &mut ResolvedConfig) {
         }
     };
 
-    let raw_value = match resolved.registry.resolve_single_data_source(provider_name, data_type, filters) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Error: data.{name}: {e}");
-            std::process::exit(1);
-        }
-    };
+    let raw_value =
+        match resolved
+            .registry
+            .resolve_single_data_source(provider_name, data_type, filters)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Error: data.{name}: {e}");
+                std::process::exit(1);
+            }
+        };
 
     // Extract schema outputs and insert into registry
-    let provider_schema = resolved.registry.data_source_schema_for(provider_name, data_type);
+    let provider_schema = resolved
+        .registry
+        .data_source_schema_for(provider_name, data_type);
     if let Some(s) = provider_schema {
         if let Ok(extracted) = schema::extract_outputs(&raw_value, &s.outputs) {
-            resolved.output_registry.insert_outputs("data", name, &extracted);
+            resolved
+                .output_registry
+                .insert_outputs("data", name, &extracted);
         }
     }
 
@@ -146,7 +154,9 @@ fn resolve_resource_hooks(name: &str, resolved: &mut ResolvedConfig) {
     };
 
     let hooks_list: Vec<config::Hook> = resource.hooks.clone();
-    if let Err(e) = hooks::execute_safe_resource_hooks(&hooks_list, name, &mut resolved.output_registry) {
+    if let Err(e) =
+        hooks::execute_safe_resource_hooks(&hooks_list, name, &mut resolved.output_registry)
+    {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
@@ -353,7 +363,7 @@ pub(crate) fn print_data_changes(changes: &[state::DataChange]) {
                 } else {
                     new_value.to_string()
                 };
-                
+
                 if old_value.is_null() {
                     println!("  ~ data.{source}.{key}: (new) -> {new_str}");
                 } else if new_value.is_null() {

@@ -55,17 +55,22 @@ pub fn run(args: &RefreshArgs) {
     let mut new_resources = old_state.resources.clone();
     for (name, snap) in &old_state.resources {
         if snap.status == state::ResourceStatus::Ready {
-            match resolved.registry.read_resource(&snap.resource_type, &snap.outputs) {
+            match resolved
+                .registry
+                .read_resource(&snap.resource_type, &snap.outputs)
+            {
                 Ok(provider::OperationResult::Complete { outputs }) => {
-                    let schema = resolved.registry.resource_schema(&snap.resource_type).ok().flatten();
+                    let schema = resolved
+                        .registry
+                        .resource_schema(&snap.resource_type)
+                        .ok()
+                        .flatten();
                     let extracted = match schema {
                         Some(s) => {
                             let map =
                                 schema::extract_outputs(&outputs, &s.outputs).unwrap_or_default();
-                            let obj: serde_json::Map<String, serde_json::Value> = map
-                                .into_iter()
-                                .map(|(k, v)| (k, v))
-                                .collect();
+                            let obj: serde_json::Map<String, serde_json::Value> =
+                                map.into_iter().map(|(k, v)| (k, v)).collect();
                             serde_json::Value::Object(obj)
                         }
                         None => outputs,

@@ -70,7 +70,9 @@ fn apply_property_changes(
         if let Some(obj) = result.as_object_mut() {
             match change {
                 PropertyChange::Added { field, new_value }
-                | PropertyChange::Modified { field, new_value, .. } => {
+                | PropertyChange::Modified {
+                    field, new_value, ..
+                } => {
                     obj.insert(field.clone(), new_value.clone());
                 }
                 PropertyChange::Removed { field, .. } => {
@@ -117,9 +119,15 @@ pub fn execute(
                 state::ResourceChange::Replace { name, .. } => {
                     delete_resource(name, state, registry, state_path)?;
                 }
-                state::ResourceChange::Update { name, resource_type, changes } => {
+                state::ResourceChange::Update {
+                    name,
+                    resource_type,
+                    changes,
+                } => {
                     // Try in-place update first
-                    if let Err(_) = update_resource(name, resource_type, changes, state, registry, state_path) {
+                    if let Err(_) =
+                        update_resource(name, resource_type, changes, state, registry, state_path)
+                    {
                         // If update fails or is not supported, fall back to delete + create
                         delete_resource(name, state, registry, state_path)?;
                     }
@@ -143,13 +151,8 @@ pub fn execute(
     for name in &order {
         if let Some(change) = changes_by_name.get(name.as_str()) {
             match change {
-                state::ResourceChange::Create {
-                    resource_type,
-                    ..
-                } | state::ResourceChange::Replace {
-                    resource_type,
-                    ..
-                } => {
+                state::ResourceChange::Create { resource_type, .. }
+                | state::ResourceChange::Replace { resource_type, .. } => {
                     let props = &changeset.resource_snapshots[name].properties;
                     create_resource(name, resource_type, props, state, registry, state_path)?;
                 }
@@ -192,17 +195,41 @@ fn create_resource(
     match result {
         OperationResult::Complete { outputs } => {
             let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-            save_resource(state, name, resource_type, ResourceStatus::Ready, properties, extracted, state_path)?;
+            save_resource(
+                state,
+                name,
+                resource_type,
+                ResourceStatus::Ready,
+                properties,
+                extracted,
+                state_path,
+            )?;
             println!("  {name}: created");
         }
         OperationResult::InProgress { outputs } => {
             let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-            save_resource(state, name, resource_type, ResourceStatus::Creating, properties, extracted, state_path)?;
+            save_resource(
+                state,
+                name,
+                resource_type,
+                ResourceStatus::Creating,
+                properties,
+                extracted,
+                state_path,
+            )?;
             poll_until_ready(name, resource_type, state, registry, state_path)?;
         }
         OperationResult::Updating { outputs } => {
             let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
-            save_resource(state, name, resource_type, ResourceStatus::Ready, properties, extracted, state_path)?;
+            save_resource(
+                state,
+                name,
+                resource_type,
+                ResourceStatus::Ready,
+                properties,
+                extracted,
+                state_path,
+            )?;
             println!("  {name}: created (updating)");
         }
         OperationResult::Failed { error } => {
@@ -279,14 +306,16 @@ fn stop_resource(
     _registry: &mut ProviderRegistry,
     state_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let snap = state.resources.get(name)
+    let snap = state
+        .resources
+        .get(name)
         .ok_or_else(|| format!("Resource {name} not found in state"))?;
-    
+
     if snap.status == ResourceStatus::Stopping || snap.status == ResourceStatus::Stopped {
         // Already stopping or stopped, continue
         return Ok(());
     }
-    
+
     set_resource_status(state, name, ResourceStatus::Stopping, state_path)?;
 
     println!("Stopping {name} ({resource_type})...");
@@ -312,14 +341,16 @@ fn start_resource(
     _registry: &mut ProviderRegistry,
     state_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let snap = state.resources.get(name)
+    let snap = state
+        .resources
+        .get(name)
         .ok_or_else(|| format!("Resource {name} not found in state"))?;
-    
+
     if snap.status == ResourceStatus::Starting || snap.status == ResourceStatus::Ready {
         // Already starting or ready
         return Ok(());
     }
-    
+
     set_resource_status(state, name, ResourceStatus::Starting, state_path)?;
 
     println!("Starting {name} ({resource_type})...");
@@ -348,8 +379,10 @@ fn update_resource(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if this update requires server stoppage
     let requires_stop = requires_stop_for_update(resource_type, property_changes, registry)?;
-    
-    let old_snapshot = state.resources.get(name)
+
+    let old_snapshot = state
+        .resources
+        .get(name)
         .ok_or_else(|| format!("Resource {name} not found in state"))?;
     let old_outputs = old_snapshot.outputs.clone();
     let new_properties = apply_property_changes(&old_snapshot.properties, property_changes);
@@ -357,10 +390,10 @@ fn update_resource(
 
     if requires_stop {
         println!("Updating {name} ({resource_type}) - stop required...");
-        
+
         // Stop the resource first
         stop_resource(name, resource_type, state, registry, state_path)?;
-        
+
         set_resource_status(state, name, ResourceStatus::Updating, state_path)?;
 
         let start = std::time::Instant::now();
@@ -386,13 +419,16 @@ fn update_resource(
         OperationResult::Complete { outputs } | OperationResult::Updating { outputs } => {
             (outputs, "updated")
         }
-        OperationResult::InProgress { outputs } => {
-            (outputs, "update in progress")
-        }
+        OperationResult::InProgress { outputs } => (outputs, "update in progress"),
         OperationResult::Failed { error } => {
             if requires_stop {
-                if let Err(start_error) = start_resource(name, resource_type, state, registry, state_path) {
-                    return Err(format!("Update failed for {name}: {error}, and restart failed: {start_error}").into());
+                if let Err(start_error) =
+                    start_resource(name, resource_type, state, registry, state_path)
+                {
+                    return Err(format!(
+                        "Update failed for {name}: {error}, and restart failed: {start_error}"
+                    )
+                    .into());
                 }
             }
             return Err(format!("Update failed for {name}: {error}").into());
@@ -478,10 +514,8 @@ fn extract_resource_outputs(
         Some(s) => {
             let extracted = schema::extract_outputs(raw_outputs, &s.outputs)?;
             // Convert HashMap<String, serde_json::Value> to JSON object
-            let map: serde_json::Map<String, serde_json::Value> = extracted
-                .into_iter()
-                .map(|(k, v)| (k, v))
-                .collect();
+            let map: serde_json::Map<String, serde_json::Value> =
+                extracted.into_iter().map(|(k, v)| (k, v)).collect();
             Ok(serde_json::Value::Object(map))
         }
         None => Ok(raw_outputs.clone()),

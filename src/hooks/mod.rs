@@ -23,7 +23,7 @@ impl HookContext {
             resource_name,
         }
     }
-    
+
     pub fn filter_sensitive_data(&self) -> serde_json::Value {
         // Filter out sensitive data from state before passing to hooks
         // This is a placeholder - actual implementation will depend on schema
@@ -40,24 +40,25 @@ pub async fn execute_hook_with_validation(
     timeout: Duration,
 ) -> Result<Value, String> {
     let runtime = runtime::HookRuntime::new();
-    
+
     // Create context object for the hook
     let context_json = context.filter_sensitive_data().to_string();
-    
+
     // Read the script file
     let script_code = std::fs::read_to_string(&hook.script)
         .map_err(|e| format!("Failed to read hook script '{}': {}", hook.script, e))?;
 
     // Prepare the script with context injection
-    let full_script = format!(
-        "const context = {};\n{}",
-        context_json,
-        script_code
-    );
-    
+    let full_script = format!("const context = {};\n{}", context_json, script_code);
+
     // Execute with timeout
-    let log_prefix = format!("{}.{}:{}", context.resource_type, context.resource_name, hook.event);
-    let output_value = runtime.execute_script(&full_script, &log_prefix, timeout).await?;
+    let log_prefix = format!(
+        "{}.{}:{}",
+        context.resource_type, context.resource_name, hook.event
+    );
+    let output_value = runtime
+        .execute_script(&full_script, &log_prefix, timeout)
+        .await?;
 
     // Validate against schema if outputs are declared
     if !hook.outputs.is_empty() {
@@ -76,11 +77,21 @@ pub fn execute_data_hooks(
     let rt = tokio::runtime::Runtime::new().unwrap();
     for hook in hooks {
         let context = HookContext::new(
-            State { version: 1, serial: 0, data: std::collections::HashMap::new(), resources: std::collections::HashMap::new() },
+            State {
+                version: 1,
+                serial: 0,
+                data: std::collections::HashMap::new(),
+                resources: std::collections::HashMap::new(),
+            },
             "data".to_string(),
             name.to_string(),
         );
-        let output = rt.block_on(execute_hook_with_validation(hook, context, Duration::from_secs(10)))
+        let output = rt
+            .block_on(execute_hook_with_validation(
+                hook,
+                context,
+                Duration::from_secs(10),
+            ))
             .map_err(|e| format!("data.{name}: {e}"))?;
         insert_hook_outputs(output_registry, "data", name, &output);
     }
@@ -98,11 +109,21 @@ pub fn execute_safe_resource_hooks(
         match hook.event.as_str() {
             "before_create" | "before_update" => {
                 let context = HookContext::new(
-                    State { version: 1, serial: 0, data: std::collections::HashMap::new(), resources: std::collections::HashMap::new() },
+                    State {
+                        version: 1,
+                        serial: 0,
+                        data: std::collections::HashMap::new(),
+                        resources: std::collections::HashMap::new(),
+                    },
                     "resource".to_string(),
                     name.to_string(),
                 );
-                let output = rt.block_on(execute_hook_with_validation(hook, context, Duration::from_secs(10)))
+                let output = rt
+                    .block_on(execute_hook_with_validation(
+                        hook,
+                        context,
+                        Duration::from_secs(10),
+                    ))
                     .map_err(|e| format!("resources.{name}: {e}"))?;
                 insert_hook_outputs(output_registry, "resources", name, &output);
             }
@@ -131,9 +152,10 @@ pub fn validate_hook_outputs(
     expected_outputs: &[crate::config::HookOutput],
 ) -> Result<(), String> {
     for expected in expected_outputs {
-        let actual = outputs.get(&expected.name)
+        let actual = outputs
+            .get(&expected.name)
             .ok_or_else(|| format!("Missing required output: {}", expected.name))?;
-        
+
         // Validate type matches
         match expected.r#type.as_str() {
             "string" => {
@@ -144,7 +166,7 @@ pub fn validate_hook_outputs(
                         get_json_type(actual)
                     ));
                 }
-            },
+            }
             "integer" => {
                 if !actual.is_number() || actual.as_f64().map_or(false, |n| n.fract() != 0.0) {
                     return Err(format!(
@@ -153,7 +175,7 @@ pub fn validate_hook_outputs(
                         get_json_type(actual)
                     ));
                 }
-            },
+            }
             "float" => {
                 if !actual.is_number() {
                     return Err(format!(
@@ -162,7 +184,7 @@ pub fn validate_hook_outputs(
                         get_json_type(actual)
                     ));
                 }
-            },
+            }
             "boolean" => {
                 if !actual.is_boolean() {
                     return Err(format!(
@@ -171,7 +193,7 @@ pub fn validate_hook_outputs(
                         get_json_type(actual)
                     ));
                 }
-            },
+            }
             "array" => {
                 if !actual.is_array() {
                     return Err(format!(
@@ -180,11 +202,11 @@ pub fn validate_hook_outputs(
                         get_json_type(actual)
                     ));
                 }
-            },
+            }
             _ => return Err(format!("Unknown output type: {}", expected.r#type)),
         }
     }
-    
+
     Ok(())
 }
 

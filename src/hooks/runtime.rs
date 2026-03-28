@@ -11,11 +11,18 @@ impl HookRuntime {
         HookRuntime
     }
 
-    pub async fn execute_script(&self, script: &str, log_prefix: &str, _timeout: Duration) -> Result<serde_json::Value, String> {
+    pub async fn execute_script(
+        &self,
+        script: &str,
+        log_prefix: &str,
+        _timeout: Duration,
+    ) -> Result<serde_json::Value, String> {
         let mut runtime = JsRuntime::new(RuntimeOptions::default());
 
         // Inject log prefix and console, wrap user script in IIFE so return works
-        let full_script = format!("const __log_prefix__ = '{log_prefix}';\n{CONSOLE_JS}\n(function() {{\n{script}\n}})()");
+        let full_script = format!(
+            "const __log_prefix__ = '{log_prefix}';\n{CONSOLE_JS}\n(function() {{\n{script}\n}})()"
+        );
 
         let global = runtime
             .execute_script("<hook>", full_script)

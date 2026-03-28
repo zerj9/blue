@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use clap::Args;
 
-use super::{compute_changeset, print_changeset, print_config, print_var_info, resolve_config, resolve_graph};
+use super::{
+    compute_changeset, print_changeset, print_config, print_var_info, resolve_config, resolve_graph,
+};
 use crate::state;
 
 #[derive(Args)]
