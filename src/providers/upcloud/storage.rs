@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::Client;
+use crate::providers::matches_filters;
 
 fn list(client: &Client) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>> {
     let url = format!("{}/1.3/storage", client.base_url);
@@ -21,37 +22,6 @@ fn list(client: &Client) -> Result<Vec<serde_json::Value>, Box<dyn std::error::E
         .ok_or_else(|| "unexpected storage response: expected storages.storage array".into())
 }
 
-fn matches(item: &serde_json::Value, filters: &HashMap<String, String>) -> bool {
-    let obj = match item.as_object() {
-        Some(o) => o,
-        None => return false,
-    };
-    for (key, value) in filters {
-        let field_value = match obj.get(key.as_str()).and_then(json_as_str) {
-            Some(fv) => fv,
-            None => return false,
-        };
-        // title uses substring match; all others use exact match
-        if key == "title" {
-            if !field_value.contains(value.as_str()) {
-                return false;
-            }
-        } else if field_value != *value {
-            return false;
-        }
-    }
-    true
-}
-
-fn json_as_str(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Number(n) => Some(n.to_string()),
-        serde_json::Value::Bool(b) => Some(b.to_string()),
-        _ => None,
-    }
-}
-
 pub fn resolve(
     client: &Client,
     filters: serde_json::Value,
@@ -60,7 +30,7 @@ pub fn resolve(
     let storages = list(client)?;
     let matched: Vec<&serde_json::Value> = storages
         .iter()
-        .filter(|s| matches(s, &filter_map))
+        .filter(|s| matches_filters(s, &filter_map, &["title"]))
         .collect();
 
     match matched.len() {
