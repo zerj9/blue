@@ -235,55 +235,13 @@ impl Schema {
     }
 
     pub fn validate(&self, resource_name: &str, properties: &toml::Value) -> Vec<ValidationError> {
-        let mut errors = Vec::new();
-        let mut flat = Vec::new();
-        flatten("", properties, &mut flat);
-
-        // Check required fields are present
-        for field in &self.fields {
-            if field.required && !flat.iter().any(|(path, _)| path == &field.path) {
-                errors.push(ValidationError::MissingRequired {
-                    resource: resource_name.to_string(),
-                    field: field.path.clone(),
-                });
-            }
-        }
-
-        // Check each property against the schema
-        for (path, value) in &flat {
-            match self.fields.iter().find(|f| &f.path == path) {
-                None => {
-                    errors.push(ValidationError::UnknownField {
-                        resource: resource_name.to_string(),
-                        field: path.clone(),
-                    });
-                }
-                Some(field) => {
-                    if !type_matches(&field.field_type, value) {
-                        errors.push(ValidationError::TypeMismatch {
-                            resource: resource_name.to_string(),
-                            field: path.clone(),
-                            expected: field.field_type.to_string(),
-                            got: toml_type_description(value),
-                        });
-                    }
-                    if field.field_type == FieldType::Array
-                        && !field.items.is_empty()
-                        && let toml::Value::Array(elements) = value
-                    {
-                        validate_array_elements(
-                            resource_name,
-                            path,
-                            elements,
-                            &field.items,
-                            &mut errors,
-                        );
-                    }
-                }
-            }
-        }
-
-        errors
+        let ctx = ValidateContext {
+            data_schemas: HashMap::new(),
+            resource_schemas: HashMap::new(),
+            data_hook_outputs: HashMap::new(),
+            resource_hook_outputs: HashMap::new(),
+        };
+        self.validate_with_refs(resource_name, properties, &ctx)
     }
 
     pub fn validate_with_refs(
@@ -322,59 +280,6 @@ impl Schema {
         }
 
         errors
-    }
-}
-
-fn validate_array_elements(
-    resource_name: &str,
-    field_path: &str,
-    elements: &[toml::Value],
-    items: &[FieldDef],
-    errors: &mut Vec<ValidationError>,
-) {
-    for (i, element) in elements.iter().enumerate() {
-        if element.as_table().is_none() {
-            errors.push(ValidationError::TypeMismatch {
-                resource: resource_name.to_string(),
-                field: format!("{field_path}[{i}]"),
-                expected: "table".to_string(),
-                got: toml_type_description(element),
-            });
-            continue;
-        }
-
-        let mut flat = Vec::new();
-        flatten("", element, &mut flat);
-
-        for item in items {
-            if item.required && !flat.iter().any(|(p, _)| p == &item.path) {
-                errors.push(ValidationError::MissingRequired {
-                    resource: resource_name.to_string(),
-                    field: format!("{field_path}[{i}].{}", item.path),
-                });
-            }
-        }
-
-        for (key, val) in &flat {
-            match items.iter().find(|item| &item.path == key) {
-                None => {
-                    errors.push(ValidationError::UnknownField {
-                        resource: resource_name.to_string(),
-                        field: format!("{field_path}[{i}].{key}"),
-                    });
-                }
-                Some(item_def) => {
-                    if !type_matches(&item_def.field_type, val) {
-                        errors.push(ValidationError::TypeMismatch {
-                            resource: resource_name.to_string(),
-                            field: format!("{field_path}[{i}].{key}"),
-                            expected: item_def.field_type.to_string(),
-                            got: toml_type_description(val),
-                        });
-                    }
-                }
-            }
-        }
     }
 }
 
