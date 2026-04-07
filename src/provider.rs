@@ -187,47 +187,4 @@ impl ProviderRegistry {
         Ok(provider.data_source_schema(data_type))
     }
 
-    pub fn validate_resources(
-        &mut self,
-        resources: &HashMap<String, config::Resource>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut errors = Vec::new();
-
-        for (name, resource) in resources {
-            let (provider_name, resource_type) = resource
-                .provider_and_type()
-                .map_err(|e| format!("resources.{name}: {e}"))?;
-
-            let provider = self
-                .get_or_init(provider_name)
-                .map_err(|e| format!("resources.{name}: {e}"))?;
-
-            let schema = match provider.resource_schema(resource_type) {
-                Some(s) => s,
-                None => {
-                    return Err(format!(
-                        "resources.{name}: unknown resource type '{resource_type}' for provider '{provider_name}'"
-                    ).into());
-                }
-            };
-
-            match &resource.properties {
-                Some(props) => errors.extend(schema.validate(name, props)),
-                None => {
-                    errors.extend(schema.validate(name, &toml::Value::Table(Default::default())))
-                }
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            let msg = errors
-                .iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
-            Err(msg.into())
-        }
-    }
 }

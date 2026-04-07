@@ -38,9 +38,103 @@ pub(crate) fn resolve_config(
 
     let registry = providers::build_registry(provider::ProviderMode::Live);
 
-    if !config.resources.is_empty() {
+    // Validate hooks
+    for (name, source) in &config.data {
+        config::validate_hooks(&source.hooks, false).map_err(|e| format!("data.{name}: {e}"))?;
+    }
+    for (name, resource) in &config.resources {
+        config::validate_hooks(&resource.hooks, true)
+            .map_err(|e| format!("resources.{name}: {e}"))?;
+    }
+
+    // Full schema + ref validation
+    {
         let mut schema_registry = providers::build_registry(provider::ProviderMode::SchemaOnly);
-        schema_registry.validate_resources(&config.resources)?;
+
+        let mut provider_names = std::collections::HashSet::new();
+        for source in config.data.values() {
+            if let Ok((provider_name, _)) = source.provider_and_type() {
+                provider_names.insert(provider_name.to_string());
+            }
+        }
+        for resource in config.resources.values() {
+            if let Ok((provider_name, _)) = resource.provider_and_type() {
+                provider_names.insert(provider_name.to_string());
+            }
+        }
+        let provider_refs: Vec<&str> = provider_names.iter().map(|s| s.as_str()).collect();
+        schema_registry.ensure_providers(&provider_refs)?;
+
+        let mut data_schemas = HashMap::new();
+        for (name, source) in &config.data {
+            let full_type = source.source_type();
+            match schema_registry.data_source_schema_ref(full_type)? {
+                Some(s) => { data_schemas.insert(name.clone(), s); }
+                None => {
+                    return Err(format!("data.{name}: unknown data source type '{full_type}'").into());
+                }
+            }
+        }
+
+        let mut resource_schemas = HashMap::new();
+        for (name, resource) in &config.resources {
+            let (provider_name, resource_type) = resource.provider_and_type()?;
+            match schema_registry.resource_schema_ref(resource.resource_type())? {
+                Some(s) => { resource_schemas.insert(name.clone(), s); }
+                None => {
+                    return Err(format!(
+                        "resources.{name}: unknown resource type '{resource_type}' for provider '{provider_name}'"
+                    ).into());
+                }
+            }
+        }
+
+        let mut data_hook_outputs: HashMap<String, Vec<&config::HookOutput>> = HashMap::new();
+        for (name, source) in &config.data {
+            let outputs: Vec<&config::HookOutput> =
+                source.hooks.iter().flat_map(|h| h.outputs.iter()).collect();
+            if !outputs.is_empty() {
+                data_hook_outputs.insert(name.clone(), outputs);
+            }
+        }
+
+        let mut resource_hook_outputs: HashMap<String, Vec<&config::HookOutput>> = HashMap::new();
+        for (name, resource) in &config.resources {
+            let outputs: Vec<&config::HookOutput> = resource
+                .hooks
+                .iter()
+                .flat_map(|h| h.outputs.iter())
+                .collect();
+            if !outputs.is_empty() {
+                resource_hook_outputs.insert(name.clone(), outputs);
+            }
+        }
+
+        let ctx = schema::ValidateContext {
+            data_schemas,
+            resource_schemas,
+            data_hook_outputs,
+            resource_hook_outputs,
+        };
+
+        let mut errors = Vec::new();
+        for (name, resource) in &config.resources {
+            let res_schema = ctx.resource_schemas.get(name.as_str()).unwrap();
+            let props = match &resource.properties {
+                Some(p) => p.clone(),
+                None => toml::Value::Table(Default::default()),
+            };
+            errors.extend(res_schema.validate(name, &props, Some(&ctx)));
+        }
+
+        if !errors.is_empty() {
+            let msg = errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Err(msg.into());
+        }
     }
 
     let output_registry = reference::OutputRegistry::new();

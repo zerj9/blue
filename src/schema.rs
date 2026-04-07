@@ -234,21 +234,11 @@ impl Schema {
             .any(|f| f.path == path && f.requires_stop)
     }
 
-    pub fn validate(&self, resource_name: &str, properties: &toml::Value) -> Vec<ValidationError> {
-        let ctx = ValidateContext {
-            data_schemas: HashMap::new(),
-            resource_schemas: HashMap::new(),
-            data_hook_outputs: HashMap::new(),
-            resource_hook_outputs: HashMap::new(),
-        };
-        self.validate_with_refs(resource_name, properties, &ctx)
-    }
-
-    pub fn validate_with_refs(
+    pub fn validate(
         &self,
         resource_name: &str,
         properties: &toml::Value,
-        ctx: &ValidateContext,
+        ctx: Option<&ValidateContext>,
     ) -> Vec<ValidationError> {
         let mut errors = Vec::new();
         let mut flat = Vec::new();
@@ -288,7 +278,7 @@ fn validate_array_elements_with_refs(
     field_path: &str,
     elements: &[toml::Value],
     items: &[FieldDef],
-    ctx: &ValidateContext,
+    ctx: Option<&ValidateContext>,
     errors: &mut Vec<ValidationError>,
 ) {
     for (i, element) in elements.iter().enumerate() {
@@ -297,7 +287,7 @@ fn validate_array_elements_with_refs(
                 resource: resource_name.to_string(),
                 field: format!("{field_path}[{i}]"),
                 expected: "table".to_string(),
-                got: toml_type_description(element),
+                got: describe_toml_for_error(element),
             });
             continue;
         }
@@ -331,13 +321,14 @@ fn validate_array_elements_with_refs(
     }
 }
 
-/// Validate a single field value against its schema definition with reference awareness.
+/// Validate a single field value against its schema definition.
+/// When `ctx` is Some, also validates cross-resource and data source references.
 fn validate_field_value(
     resource_name: &str,
     field_path: &str,
     value: &toml::Value,
     field_def: &FieldDef,
-    ctx: &ValidateContext,
+    ctx: Option<&ValidateContext>,
     errors: &mut Vec<ValidationError>,
 ) {
     match classify_value(value) {
@@ -347,7 +338,7 @@ fn validate_field_value(
                     resource: resource_name.to_string(),
                     field: field_path.to_string(),
                     expected: field_def.field_type.to_string(),
-                    got: toml_type_description(value),
+                    got: describe_toml_for_error(value),
                 });
             }
             if field_def.field_type == FieldType::Array
@@ -364,138 +355,152 @@ fn validate_field_value(
                 );
             }
         }
-        RefKind::DataRef { source, field } => match ctx.data_schemas.get(&source) {
-            None => {
-                errors.push(ValidationError::UnknownDataSource {
-                    resource: resource_name.to_string(),
-                    field: field_path.to_string(),
-                    source,
-                });
+        RefKind::DataRef { source, field } => {
+            if let Some(ctx) = ctx {
+                match ctx.data_schemas.get(&source) {
+                    None => {
+                        errors.push(ValidationError::UnknownDataSource {
+                            resource: resource_name.to_string(),
+                            field: field_path.to_string(),
+                            source,
+                        });
+                    }
+                    Some(schema) => match schema.output(&field) {
+                        None => {
+                            errors.push(ValidationError::UnknownDataField {
+                                resource: resource_name.to_string(),
+                                field: field_path.to_string(),
+                                source,
+                                output: field,
+                            });
+                        }
+                        Some(output_def) => {
+                            if !output_type_compatible(&field_def.field_type, &output_def.output_type) {
+                                errors.push(ValidationError::RefTypeMismatch {
+                                    resource: resource_name.to_string(),
+                                    field: field_path.to_string(),
+                                    expected: field_def.field_type.clone(),
+                                    ref_path: format!("data.{source}.{field}"),
+                                    got: output_def.output_type.clone(),
+                                });
+                            }
+                        }
+                    },
+                }
             }
-            Some(schema) => match schema.output(&field) {
-                None => {
+        }
+        RefKind::ResourceRef { resource, field } => {
+            if let Some(ctx) = ctx {
+                match ctx.resource_schemas.get(&resource) {
+                    None => {
+                        errors.push(ValidationError::UnknownResourceRef {
+                            resource: resource_name.to_string(),
+                            field: field_path.to_string(),
+                            referenced: resource,
+                        });
+                    }
+                    Some(schema) => match schema.output(&field) {
+                        None => {
+                            errors.push(ValidationError::UnknownResourceField {
+                                resource: resource_name.to_string(),
+                                field: field_path.to_string(),
+                                referenced: resource,
+                                output: field,
+                            });
+                        }
+                        Some(output_def) => {
+                            if !output_type_compatible(&field_def.field_type, &output_def.output_type) {
+                                errors.push(ValidationError::RefTypeMismatch {
+                                    resource: resource_name.to_string(),
+                                    field: field_path.to_string(),
+                                    expected: field_def.field_type.clone(),
+                                    ref_path: format!("resources.{resource}.{field}"),
+                                    got: output_def.output_type.clone(),
+                                });
+                            }
+                        }
+                    },
+                }
+            }
+        }
+        RefKind::DataHookRef { source, output } => {
+            if let Some(ctx) = ctx {
+                if !ctx.data_schemas.contains_key(&source) {
+                    errors.push(ValidationError::UnknownDataSource {
+                        resource: resource_name.to_string(),
+                        field: field_path.to_string(),
+                        source,
+                    });
+                } else if let Some(hook_output) = ctx
+                    .data_hook_outputs
+                    .get(&source)
+                    .and_then(|outputs| outputs.iter().find(|o| o.name == output))
+                {
+                    if let Some(output_type) = hook_output_type_to_field_type(&hook_output.r#type) {
+                        if !output_type_compatible(&field_def.field_type, &output_type) {
+                            errors.push(ValidationError::RefTypeMismatch {
+                                resource: resource_name.to_string(),
+                                field: field_path.to_string(),
+                                expected: field_def.field_type.clone(),
+                                ref_path: format!("data.{source}.hooks.outputs.{output}"),
+                                got: output_type,
+                            });
+                        }
+                    }
+                } else {
                     errors.push(ValidationError::UnknownDataField {
                         resource: resource_name.to_string(),
                         field: field_path.to_string(),
                         source,
-                        output: field,
+                        output,
                     });
                 }
-                Some(output_def) => {
-                    if !output_type_compatible(&field_def.field_type, &output_def.output_type) {
-                        errors.push(ValidationError::RefTypeMismatch {
-                            resource: resource_name.to_string(),
-                            field: field_path.to_string(),
-                            expected: field_def.field_type.clone(),
-                            ref_path: format!("data.{source}.{field}"),
-                            got: output_def.output_type.clone(),
-                        });
-                    }
-                }
-            },
-        },
-        RefKind::ResourceRef { resource, field } => match ctx.resource_schemas.get(&resource) {
-            None => {
-                errors.push(ValidationError::UnknownResourceRef {
-                    resource: resource_name.to_string(),
-                    field: field_path.to_string(),
-                    referenced: resource,
-                });
             }
-            Some(schema) => match schema.output(&field) {
-                None => {
+        }
+        RefKind::ResourceHookRef { resource, output } => {
+            if let Some(ctx) = ctx {
+                if !ctx.resource_schemas.contains_key(&resource) {
+                    errors.push(ValidationError::UnknownResourceRef {
+                        resource: resource_name.to_string(),
+                        field: field_path.to_string(),
+                        referenced: resource,
+                    });
+                } else if let Some(hook_output) = ctx
+                    .resource_hook_outputs
+                    .get(&resource)
+                    .and_then(|outputs| outputs.iter().find(|o| o.name == output))
+                {
+                    if let Some(output_type) = hook_output_type_to_field_type(&hook_output.r#type) {
+                        if !output_type_compatible(&field_def.field_type, &output_type) {
+                            errors.push(ValidationError::RefTypeMismatch {
+                                resource: resource_name.to_string(),
+                                field: field_path.to_string(),
+                                expected: field_def.field_type.clone(),
+                                ref_path: format!("resources.{resource}.hooks.outputs.{output}"),
+                                got: output_type,
+                            });
+                        }
+                    }
+                } else {
                     errors.push(ValidationError::UnknownResourceField {
                         resource: resource_name.to_string(),
                         field: field_path.to_string(),
                         referenced: resource,
-                        output: field,
+                        output,
                     });
                 }
-                Some(output_def) => {
-                    if !output_type_compatible(&field_def.field_type, &output_def.output_type) {
-                        errors.push(ValidationError::RefTypeMismatch {
-                            resource: resource_name.to_string(),
-                            field: field_path.to_string(),
-                            expected: field_def.field_type.clone(),
-                            ref_path: format!("resources.{resource}.{field}"),
-                            got: output_def.output_type.clone(),
-                        });
-                    }
-                }
-            },
-        },
-        RefKind::DataHookRef { source, output } => {
-            if !ctx.data_schemas.contains_key(&source) {
-                errors.push(ValidationError::UnknownDataSource {
-                    resource: resource_name.to_string(),
-                    field: field_path.to_string(),
-                    source,
-                });
-            } else if let Some(hook_output) = ctx
-                .data_hook_outputs
-                .get(&source)
-                .and_then(|outputs| outputs.iter().find(|o| o.name == output))
-            {
-                if let Some(output_type) = hook_output_type_to_field_type(&hook_output.r#type) {
-                    if !output_type_compatible(&field_def.field_type, &output_type) {
-                        errors.push(ValidationError::RefTypeMismatch {
-                            resource: resource_name.to_string(),
-                            field: field_path.to_string(),
-                            expected: field_def.field_type.clone(),
-                            ref_path: format!("data.{source}.hooks.outputs.{output}"),
-                            got: output_type,
-                        });
-                    }
-                }
-            } else {
-                errors.push(ValidationError::UnknownDataField {
-                    resource: resource_name.to_string(),
-                    field: field_path.to_string(),
-                    source,
-                    output,
-                });
-            }
-        }
-        RefKind::ResourceHookRef { resource, output } => {
-            if !ctx.resource_schemas.contains_key(&resource) {
-                errors.push(ValidationError::UnknownResourceRef {
-                    resource: resource_name.to_string(),
-                    field: field_path.to_string(),
-                    referenced: resource,
-                });
-            } else if let Some(hook_output) = ctx
-                .resource_hook_outputs
-                .get(&resource)
-                .and_then(|outputs| outputs.iter().find(|o| o.name == output))
-            {
-                if let Some(output_type) = hook_output_type_to_field_type(&hook_output.r#type) {
-                    if !output_type_compatible(&field_def.field_type, &output_type) {
-                        errors.push(ValidationError::RefTypeMismatch {
-                            resource: resource_name.to_string(),
-                            field: field_path.to_string(),
-                            expected: field_def.field_type.clone(),
-                            ref_path: format!("resources.{resource}.hooks.outputs.{output}"),
-                            got: output_type,
-                        });
-                    }
-                }
-            } else {
-                errors.push(ValidationError::UnknownResourceField {
-                    resource: resource_name.to_string(),
-                    field: field_path.to_string(),
-                    referenced: resource,
-                    output,
-                });
             }
         }
         RefKind::MixedTemplate => {
-            if field_def.field_type != FieldType::String {
-                errors.push(ValidationError::TypeMismatch {
-                    resource: resource_name.to_string(),
-                    field: field_path.to_string(),
-                    expected: field_def.field_type.to_string(),
-                    got: "mixed template (always string)".to_string(),
-                });
+            if let Some(_) = ctx {
+                if field_def.field_type != FieldType::String {
+                    errors.push(ValidationError::TypeMismatch {
+                        resource: resource_name.to_string(),
+                        field: field_path.to_string(),
+                        expected: field_def.field_type.to_string(),
+                        got: "mixed template (always string)".to_string(),
+                    });
+                }
             }
         }
     }
@@ -621,7 +626,9 @@ fn hook_output_type_to_field_type(type_str: &str) -> Option<FieldType> {
     }
 }
 
-fn toml_type_description(value: &toml::Value) -> String {
+/// Returns a human-readable representation of a TOML value for use in the `got` field of validation errors.
+/// For scalars, returns the actual value; for composites, returns the type name.
+fn describe_toml_for_error(value: &toml::Value) -> String {
     match value {
         toml::Value::String(s) => s.clone(),
         toml::Value::Integer(n) => n.to_string(),

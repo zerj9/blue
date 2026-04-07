@@ -115,14 +115,6 @@ pub fn load(
     Ok(config)
 }
 
-pub fn load_for_validation(
-    raw: &str,
-    overrides: &HashMap<String, String>,
-    config_dir: &Path,
-) -> Result<Config, Box<dyn std::error::Error>> {
-    load(raw, overrides, config_dir)
-}
-
 pub fn toml_value_to_string(val: &toml::Value) -> String {
     match val {
         toml::Value::String(s) => s.clone(),
