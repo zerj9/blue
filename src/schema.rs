@@ -169,6 +169,7 @@ impl fmt::Display for ValidationError {
 }
 
 pub struct ValidateContext<'a> {
+    pub parameters: &'a HashMap<String, crate::config::Parameter>,
     pub data_schemas: HashMap<String, &'a Schema>,
     pub resource_schemas: HashMap<String, &'a Schema>,
     pub data_hook_outputs: HashMap<String, Vec<&'a crate::config::HookOutput>>,
@@ -353,6 +354,30 @@ fn validate_field_value(
                     ctx,
                     errors,
                 );
+            }
+        }
+        RefKind::ParameterRef { name } => {
+            if let Some(ctx) = ctx {
+                match ctx.parameters.get(&name) {
+                    None => {
+                        errors.push(ValidationError::UnknownResourceRef {
+                            resource: resource_name.to_string(),
+                            field: field_path.to_string(),
+                            referenced: format!("parameter '{name}'"),
+                        });
+                    }
+                    Some(param) => {
+                        if !output_type_compatible(&field_def.field_type, &param.param_type()) {
+                            errors.push(ValidationError::RefTypeMismatch {
+                                resource: resource_name.to_string(),
+                                field: field_path.to_string(),
+                                expected: field_def.field_type.clone(),
+                                ref_path: format!("parameters.{name}"),
+                                got: param.param_type(),
+                            });
+                        }
+                    }
+                }
             }
         }
         RefKind::DataRef { source, field } => {
@@ -558,6 +583,7 @@ fn type_matches(expected: &FieldType, value: &toml::Value) -> bool {
 
 enum RefKind {
     Literal,
+    ParameterRef { name: String },
     DataRef { source: String, field: String },
     ResourceRef { resource: String, field: String },
     DataHookRef { source: String, output: String },
@@ -576,6 +602,7 @@ fn classify_value(value: &toml::Value) -> RefKind {
                 if let Some(r) = Ref::parse(inner) {
                     let hook_output = r.hook_output_name().map(|s| s.to_string());
                     return match (r.source.as_str(), r.is_hook_output()) {
+                        ("parameters", _) => RefKind::ParameterRef { name: r.name },
                         ("data", true) => RefKind::DataHookRef {
                             source: r.name,
                             output: hook_output.unwrap(),

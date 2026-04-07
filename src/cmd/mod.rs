@@ -33,8 +33,9 @@ pub(crate) fn resolve_config(
     let config = config::load(&raw, &cli_vars, config_dir)
         .map_err(|e| format!("failed to parse {}: {e}", file.display()))?;
 
-    let dep_graph = graph::DependencyGraph::build(&config.data, &config.resources)
-        .map_err(|e| format!("failed to build dependency graph: {e}"))?;
+    let dep_graph =
+        graph::DependencyGraph::build(&config.parameters, &config.data, &config.resources)
+            .map_err(|e| format!("failed to build dependency graph: {e}"))?;
 
     let registry = providers::build_registry(provider::ProviderMode::Live);
 
@@ -111,6 +112,7 @@ pub(crate) fn resolve_config(
         }
 
         let ctx = schema::ValidateContext {
+            parameters: &config.parameters,
             data_schemas,
             resource_schemas,
             data_hook_outputs,
@@ -156,6 +158,9 @@ pub(crate) fn resolve_graph(
 
     for (name, kind) in &order {
         match kind {
+            graph::NodeKind::Parameter => {
+                resolve_parameter_node(name, resolved)?;
+            }
             graph::NodeKind::Data => {
                 resolve_data_node(name, resolved)?;
             }
@@ -220,6 +225,129 @@ fn resolve_resource_hooks(
     Ok(())
 }
 
+fn resolve_parameter_node(
+    name: &str,
+    resolved: &mut ResolvedConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let param = match resolved.config.parameters.get(name) {
+        Some(p) => p.clone(),
+        None => return Ok(()),
+    };
+
+    // Priority: env var > CLI override > default
+    let raw_value = if let Some(ref env_key) = param.env {
+        match std::env::var(env_key) {
+            Ok(val) => Some(toml_value_from_string(&val, &param.param_type())),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let raw_value = raw_value
+        .or_else(|| {
+            resolved
+                .config
+                .overrides
+                .get(name)
+                .map(|v| toml_value_from_string(v, &param.param_type()))
+        })
+        .or_else(|| param.default.clone())
+        .ok_or_else(|| format!("parameter '{name}' has no value (no env, override, or default)"))?;
+
+    // Resolve any refs in the default value (e.g., a parameter whose default references a data source)
+    let json_value = toml_value_to_json(&raw_value);
+    let text = json_value.to_string();
+    let resolved_text = reference::Ref::resolve_all(&text, &resolved.output_registry)
+        .map_err(|e| format!("parameter '{name}': {e}"))?;
+    let resolved_json: serde_json::Value = serde_json::from_str(&resolved_text)
+        .unwrap_or_else(|_| serde_json::Value::String(resolved_text));
+
+    // Validate type
+    if !json_type_matches_field(&param.param_type(), &resolved_json) {
+        return Err(format!(
+            "parameter '{name}': expected {}, got {}",
+            param.param_type(),
+            json_type_description(&resolved_json)
+        )
+        .into());
+    }
+
+    resolved
+        .output_registry
+        .insert("parameters", name, "value", resolved_json);
+    Ok(())
+}
+
+fn toml_value_from_string(s: &str, expected: &schema::FieldType) -> toml::Value {
+    match expected {
+        schema::FieldType::Integer => s
+            .parse::<i64>()
+            .map(toml::Value::Integer)
+            .unwrap_or_else(|_| toml::Value::String(s.to_string())),
+        schema::FieldType::Float => s
+            .parse::<f64>()
+            .map(toml::Value::Float)
+            .unwrap_or_else(|_| toml::Value::String(s.to_string())),
+        schema::FieldType::Boolean => s
+            .parse::<bool>()
+            .map(toml::Value::Boolean)
+            .unwrap_or_else(|_| toml::Value::String(s.to_string())),
+        _ => toml::Value::String(s.to_string()),
+    }
+}
+
+fn toml_value_to_json(value: &toml::Value) -> serde_json::Value {
+    match value {
+        toml::Value::String(s) => serde_json::Value::String(s.clone()),
+        toml::Value::Integer(n) => serde_json::json!(n),
+        toml::Value::Float(f) => serde_json::json!(f),
+        toml::Value::Boolean(b) => serde_json::Value::Bool(*b),
+        toml::Value::Array(arr) => {
+            serde_json::Value::Array(arr.iter().map(toml_value_to_json).collect())
+        }
+        toml::Value::Table(t) => {
+            let map: serde_json::Map<String, serde_json::Value> =
+                t.iter().map(|(k, v)| (k.clone(), toml_value_to_json(v))).collect();
+            serde_json::Value::Object(map)
+        }
+        toml::Value::Datetime(d) => serde_json::Value::String(d.to_string()),
+    }
+}
+
+fn json_type_matches_field(expected: &schema::FieldType, value: &serde_json::Value) -> bool {
+    match expected {
+        schema::FieldType::String => matches!(value, serde_json::Value::String(_)),
+        schema::FieldType::Integer => {
+            matches!(value, serde_json::Value::Number(n) if n.is_i64() || n.is_u64())
+        }
+        schema::FieldType::Float => matches!(value, serde_json::Value::Number(_)),
+        schema::FieldType::Boolean => matches!(value, serde_json::Value::Bool(_)),
+        schema::FieldType::Array => matches!(value, serde_json::Value::Array(_)),
+    }
+}
+
+fn json_type_description(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+        serde_json::Value::Null => "null",
+    }
+}
+
+fn secret_param_names(
+    parameters: &HashMap<String, config::Parameter>,
+) -> std::collections::HashSet<String> {
+    parameters
+        .iter()
+        .filter(|(_, p)| p.secret)
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
 pub(crate) fn build_cli_vars(
     var: &[String],
     var_file: Option<&Path>,
@@ -256,8 +384,12 @@ pub(crate) fn compute_changeset(
     let data_changes = state::diff_data(&old_state.data, &data_snapshots);
 
     // Resolve resource properties using the output registry before snapshotting
-    let resource_snapshots =
-        state::snapshot_resources_resolved(&resolved.config.resources, &resolved.output_registry);
+    let secret_params = secret_param_names(&resolved.config.parameters);
+    let resource_snapshots = state::snapshot_resources_resolved(
+        &resolved.config.resources,
+        &resolved.output_registry,
+        &secret_params,
+    );
     let resource_changes = state::diff_resources(
         &old_state.resources,
         &resource_snapshots,

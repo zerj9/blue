@@ -315,8 +315,25 @@ pub fn diff_data(
 pub fn snapshot_resources_resolved(
     resources: &HashMap<String, config::Resource>,
     output_registry: &crate::reference::OutputRegistry,
+    secret_params: &std::collections::HashSet<String>,
 ) -> HashMap<String, ResourceSnapshot> {
     use crate::reference::Ref;
+
+    // Collect secret (param_name, plaintext_value) pairs for redaction
+    let secret_entries: Vec<(String, String)> = secret_params
+        .iter()
+        .filter_map(|name| {
+            output_registry
+                .get("parameters", name, "value")
+                .map(|v| {
+                    let plaintext = match v {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    (name.clone(), plaintext)
+                })
+        })
+        .collect();
 
     let mut snapshots = HashMap::new();
     for (name, resource) in resources {
@@ -326,7 +343,12 @@ pub fn snapshot_resources_resolved(
                 // Resolve any {{...}} refs in the serialized properties
                 let text = json.to_string();
                 match Ref::resolve_all(&text, output_registry) {
-                    Ok(resolved) => serde_json::from_str(&resolved).unwrap_or(json),
+                    Ok(resolved) => {
+                        let mut json: serde_json::Value =
+                            serde_json::from_str(&resolved).unwrap_or(json);
+                        redact_secrets(&mut json, &secret_entries);
+                        json
+                    }
                     Err(_) => json, // Fall back to unresolved if resolution fails
                 }
             }
@@ -343,6 +365,43 @@ pub fn snapshot_resources_resolved(
         );
     }
     snapshots
+}
+
+/// Replaces secret values with `<secret:HMAC-SHA256>` using the parameter name as the HMAC key.
+/// Using the parameter name as key means the same secret value produces a stable hash per parameter,
+/// allowing the diff logic to detect actual secret changes (e.g. token rotation).
+fn redact_secrets(
+    value: &mut serde_json::Value,
+    secret_entries: &[(String, String)], // (param_name, plaintext_value)
+) {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    match value {
+        serde_json::Value::String(s) => {
+            for (param_name, secret_val) in secret_entries {
+                if s == secret_val {
+                    let mut mac = Hmac::<Sha256>::new_from_slice(param_name.as_bytes())
+                        .expect("HMAC accepts any key size");
+                    mac.update(s.as_bytes());
+                    let hash_hex = hex::encode(mac.finalize().into_bytes());
+                    *s = format!("<secret:{hash_hex}>");
+                    break;
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for v in map.values_mut() {
+                redact_secrets(v, secret_entries);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                redact_secrets(v, secret_entries);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn diff_properties(

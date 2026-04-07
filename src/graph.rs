@@ -8,6 +8,7 @@ use crate::reference::Ref;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeKind {
+    Parameter,
     Data,
     Resource,
 }
@@ -18,14 +19,21 @@ pub struct DependencyGraph {
 }
 
 impl DependencyGraph {
-    /// Build a unified graph from data sources and resources.
-    /// Edges are derived from `{{...}}` refs in properties and filters.
+    /// Build a unified graph from parameters, data sources and resources.
+    /// Edges are derived from `{{...}}` refs in properties, filters, and parameter defaults.
     pub fn build(
+        parameters: &HashMap<String, config::Parameter>,
         data_sources: &HashMap<String, config::DataSource>,
         resources: &HashMap<String, config::Resource>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut graph = DiGraph::new();
         let mut node_indices = HashMap::new();
+
+        // Add parameters as nodes
+        for name in parameters.keys() {
+            let idx = graph.add_node((name.clone(), NodeKind::Parameter));
+            node_indices.insert(name.clone(), idx);
+        }
 
         // Add data sources as nodes
         for name in data_sources.keys() {
@@ -37,6 +45,37 @@ impl DependencyGraph {
         for name in resources.keys() {
             let idx = graph.add_node((name.clone(), NodeKind::Resource));
             node_indices.insert(name.clone(), idx);
+        }
+
+        // Add edges from parameter default refs
+        for (name, param) in parameters {
+            if let Some(default) = &param.default {
+                let text = default.to_string();
+                for r in Ref::parse_all(&text) {
+                    let dep_name = r.target();
+                    if let Some(&from) = node_indices.get(dep_name) {
+                        let to = node_indices[name];
+                        if from != to {
+                            graph.add_edge(from, to, ());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add edges from data source filter refs
+        for (name, source) in data_sources {
+            for filter_val in source.filters.values() {
+                for r in Ref::parse_all(filter_val) {
+                    let dep_name = r.target();
+                    if let Some(&from) = node_indices.get(dep_name) {
+                        let to = node_indices[name];
+                        if from != to {
+                            graph.add_edge(from, to, ());
+                        }
+                    }
+                }
+            }
         }
 
         // Add edges from resource property refs

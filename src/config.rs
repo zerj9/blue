@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::schema::FieldType;
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Hook {
     pub event: String,
@@ -24,6 +26,8 @@ pub struct Config {
     pub data: HashMap<String, DataSource>,
     #[serde(default)]
     pub resources: HashMap<String, Resource>,
+    #[serde(skip)]
+    pub overrides: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,10 +57,38 @@ pub fn split_provider_type(s: &str) -> Result<(&str, &str), Box<dyn std::error::
         })
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Parameter {
     pub description: Option<String>,
     pub default: Option<toml::Value>,
+    #[serde(rename = "type")]
+    param_type_explicit: Option<FieldType>,
+    #[serde(default)]
+    pub secret: bool,
+    pub env: Option<String>,
+}
+
+impl Parameter {
+    pub fn param_type(&self) -> FieldType {
+        if let Some(ref t) = self.param_type_explicit {
+            return t.clone();
+        }
+        if let Some(ref default) = self.default {
+            return infer_field_type(default);
+        }
+        FieldType::String
+    }
+}
+
+fn infer_field_type(value: &toml::Value) -> FieldType {
+    match value {
+        toml::Value::String(_) => FieldType::String,
+        toml::Value::Integer(_) => FieldType::Integer,
+        toml::Value::Float(_) => FieldType::Float,
+        toml::Value::Boolean(_) => FieldType::Boolean,
+        toml::Value::Array(_) => FieldType::Array,
+        _ => FieldType::String,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,35 +111,13 @@ impl DataSource {
     }
 }
 
-#[derive(Deserialize)]
-struct FirstPass {
-    #[serde(default)]
-    parameters: HashMap<String, Parameter>,
-}
-
 pub fn load(
     raw: &str,
     overrides: &HashMap<String, String>,
     config_dir: &Path,
 ) -> Result<Config, Box<dyn std::error::Error>> {
-    // First pass: extract parameter defaults
-    let first: FirstPass = toml::from_str(raw)?;
-    let mut vars = HashMap::new();
-    for (key, param) in &first.parameters {
-        if let Some(ref val) = param.default {
-            vars.insert(key.clone(), toml_value_to_string(val));
-        }
-    }
-
-    // CLI overrides win
-    for (k, v) in overrides {
-        vars.insert(k.clone(), v.clone());
-    }
-
-    // Interpolate only parameters/overrides; data.* and resources.* refs are deferred
-    let interpolated = interpolate(raw, &vars)?;
-
-    let mut config: Config = toml::from_str(&interpolated)?;
+    let mut config: Config = toml::from_str(raw)?;
+    config.overrides = overrides.clone();
 
     // Resolve all hook script paths relative to config directory
     resolve_hook_paths(&mut config, config_dir)?;
@@ -123,38 +133,6 @@ pub fn toml_value_to_string(val: &toml::Value) -> String {
         toml::Value::Boolean(b) => b.to_string(),
         other => other.to_string(),
     }
-}
-
-fn interpolate(
-    text: &str,
-    vars: &HashMap<String, String>,
-) -> Result<String, Box<dyn std::error::Error>> {
-    use crate::reference::Ref;
-
-    let mut result = String::with_capacity(text.len());
-    let mut rest = text;
-
-    while let Some(start) = rest.find("{{") {
-        result.push_str(&rest[..start]);
-        let after_open = &rest[start + 2..];
-        let end = after_open
-            .find("}}")
-            .ok_or_else(|| format!("unclosed '{{{{' at byte {start}"))?;
-        let key = after_open[..end].trim();
-        if Ref::parse(key).is_some() {
-            // data/resource/hook ref — leave as-is for graph-driven resolution
-            result.push_str(&rest[start..start + 2 + end + 2]);
-        } else {
-            // Parameter or override — resolve now
-            let value = vars
-                .get(key)
-                .ok_or_else(|| format!("unresolved variable: {key}"))?;
-            result.push_str(value);
-        }
-        rest = &after_open[end + 2..];
-    }
-    result.push_str(rest);
-    Ok(result)
 }
 
 /// Resolve all hook script paths to absolute paths within the config directory.

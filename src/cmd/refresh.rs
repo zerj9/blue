@@ -90,9 +90,11 @@ pub fn run(args: &RefreshArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     // Update properties from config for resources already in state
     if !new_resources.is_empty() {
+        let secret_params = super::secret_param_names(&resolved.config.parameters);
         let config_snapshots = state::snapshot_resources_resolved(
             &resolved.config.resources,
             &resolved.output_registry,
+            &secret_params,
         );
         for (name, snap) in &mut new_resources {
             if let Some(config_snap) = config_snapshots.get(name) {

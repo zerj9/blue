@@ -19,6 +19,19 @@ impl Ref {
     /// Returns None if the format is invalid.
     pub fn parse(inner: &str) -> Option<Self> {
         let inner = inner.trim();
+
+        // Parameters have no path component: "parameters.disk_size"
+        if let Some(rest) = inner.strip_prefix("parameters.") {
+            if rest.is_empty() || rest.contains('.') {
+                return None;
+            }
+            return Some(Self {
+                source: "parameters".to_string(),
+                name: rest.to_string(),
+                path: "value".to_string(),
+            });
+        }
+
         let (source, rest) = if let Some(rest) = inner.strip_prefix("data.") {
             ("data", rest)
         } else if let Some(rest) = inner.strip_prefix("resources.") {
@@ -215,6 +228,23 @@ mod tests {
     }
 
     #[test]
+    fn parse_parameter_ref() {
+        let r = Ref::parse("parameters.disk_size").unwrap();
+        assert_eq!(r.source, "parameters");
+        assert_eq!(r.name, "disk_size");
+        assert_eq!(r.path, "value");
+        assert!(!r.is_hook_output());
+        assert_eq!(r.target(), "disk_size");
+    }
+
+    #[test]
+    fn parse_parameter_invalid() {
+        // Parameters cannot have a dotted path
+        assert!(Ref::parse("parameters.disk.size").is_none());
+        assert!(Ref::parse("parameters.").is_none());
+    }
+
+    #[test]
     fn parse_invalid() {
         assert!(Ref::parse("just_a_param").is_none());
         assert!(Ref::parse("data.").is_none());
@@ -224,11 +254,11 @@ mod tests {
 
     #[test]
     fn parse_all_finds_refs() {
-        let text = r#"hostname = "{{ data.ubuntu.uuid }}" storage = "{{ resources.web-01.id }}""#;
+        let text = r#"hostname = "{{ data.ubuntu.uuid }}" size = "{{ parameters.disk_size }}""#;
         let refs = Ref::parse_all(text);
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0].name, "ubuntu");
-        assert_eq!(refs[1].name, "web-01");
+        assert_eq!(refs[1].name, "disk_size");
     }
 
     #[test]
@@ -251,11 +281,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_all_leaves_params() {
+    fn resolve_all_leaves_unknown_placeholders() {
         let reg = OutputRegistry::new();
-        let text = r#"size = "{{ disk_size }}""#;
+        let text = r#"size = "{{ unknown_thing }}""#;
         let resolved = Ref::resolve_all(text, &reg).unwrap();
         assert_eq!(resolved, text);
+    }
+
+    #[test]
+    fn resolve_all_resolves_parameter() {
+        let mut reg = OutputRegistry::new();
+        reg.insert("parameters", "disk_size", "value", serde_json::json!("10"));
+
+        let text = r#"size = "{{ parameters.disk_size }}""#;
+        let resolved = Ref::resolve_all(text, &reg).unwrap();
+        assert_eq!(resolved, r#"size = "10""#);
     }
 
     #[test]
