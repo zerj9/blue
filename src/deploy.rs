@@ -69,7 +69,9 @@ fn apply_property_changes(
     for change in changes {
         if let Some(obj) = result.as_object_mut() {
             match change {
-                PropertyChange::Added { field, new_value }
+                PropertyChange::Added {
+                    field, new_value, ..
+                }
                 | PropertyChange::Modified {
                     field, new_value, ..
                 } => {

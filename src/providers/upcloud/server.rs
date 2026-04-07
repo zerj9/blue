@@ -113,6 +113,28 @@ pub fn create(
         server["metadata"] = serde_json::Value::String(val.to_string());
     }
 
+    if let Some(user_data) = properties.get("user_data").and_then(|v| v.as_str()) {
+        server["user_data"] = serde_json::Value::String(user_data.to_string());
+    }
+
+    if let Some(login_user) = properties.get("login_user").and_then(|v| v.as_object()) {
+        let mut api_login = serde_json::json!({});
+        if let Some(username) = login_user.get("username").and_then(|v| v.as_str()) {
+            api_login["username"] = serde_json::Value::String(username.to_string());
+        }
+        if let Some(create_pw) = login_user.get("create_password").and_then(|v| v.as_str()) {
+            api_login["create_password"] = serde_json::Value::String(create_pw.to_string());
+        }
+        if let Some(keys) = login_user.get("ssh_keys").and_then(|v| v.as_array()) {
+            let ssh_keys: Vec<serde_json::Value> = keys
+                .iter()
+                .filter_map(|k| k.as_str().map(|s| serde_json::Value::String(s.to_string())))
+                .collect();
+            api_login["ssh_keys"] = serde_json::json!({ "ssh_key": ssh_keys });
+        }
+        server["login_user"] = api_login;
+    }
+
     let body = serde_json::json!({ "server": server });
 
     let url = format!("{}/1.3/server", client.base_url);

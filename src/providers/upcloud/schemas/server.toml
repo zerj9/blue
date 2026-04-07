@@ -81,6 +81,25 @@ path = "title"
 type = "string"
 required = true
 
+[[fields]]
+path = "user_data"
+type = "string"
+
+[[fields]]
+path = "login_user.username"
+type = "string"
+force_new = true
+
+[[fields]]
+path = "login_user.create_password"
+type = "string"
+force_new = true
+
+[[fields]]
+path = "login_user.ssh_keys"
+type = "array"
+force_new = true
+
 [[outputs]]
 path = "uuid"
 type = "string"

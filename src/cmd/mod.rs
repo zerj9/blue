@@ -476,8 +476,17 @@ fn print_property_list(properties: &serde_json::Value) {
 fn print_property_changes(changes: &[state::PropertyChange]) {
     for change in changes {
         match change {
-            state::PropertyChange::Added { field, new_value } => {
-                println!("      + {field} = {}", json_display(new_value));
+            state::PropertyChange::Added {
+                field,
+                new_value,
+                force_new,
+            } => {
+                let annotation = if *force_new {
+                    " (forces replacement)"
+                } else {
+                    ""
+                };
+                println!("      + {field} = {}{annotation}", json_display(new_value));
             }
             state::PropertyChange::Removed { field, old_value } => {
                 println!("      - {field} = {}", json_display(old_value));

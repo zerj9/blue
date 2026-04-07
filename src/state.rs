@@ -48,6 +48,7 @@ pub enum PropertyChange {
     Added {
         field: String,
         new_value: serde_json::Value,
+        force_new: bool,
     },
     Removed {
         field: String,
@@ -422,9 +423,11 @@ fn diff_properties(
     for (field, new_value) in &new_map {
         match old_map.get(field) {
             None => {
+                let force_new = schema.is_some_and(|s| s.is_force_new(field));
                 changes.push(PropertyChange::Added {
                     field: field.clone(),
                     new_value: new_value.clone(),
+                    force_new,
                 });
             }
             Some(old_value) if old_value != new_value => {
@@ -489,6 +492,9 @@ pub fn diff_resources(
                             matches!(
                                 c,
                                 PropertyChange::Modified {
+                                    force_new: true,
+                                    ..
+                                } | PropertyChange::Added {
                                     force_new: true,
                                     ..
                                 }
