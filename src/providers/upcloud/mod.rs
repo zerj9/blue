@@ -1,4 +1,5 @@
 pub mod managed_object_storage;
+pub mod managed_object_storage_service;
 pub mod server;
 pub mod storage;
 
@@ -31,6 +32,15 @@ fn managed_object_storage_regions_schema() -> &'static Schema {
     MANAGED_OBJECT_STORAGE_REGIONS_SCHEMA.get_or_init(|| {
         Schema::from_toml(include_str!("schemas/managed_object_storage_regions.toml"))
             .expect("built-in managed object storage regions schema is invalid")
+    })
+}
+
+static MANAGED_OBJECT_STORAGE_SERVICE_SCHEMA: OnceLock<Schema> = OnceLock::new();
+
+fn managed_object_storage_service_schema() -> &'static Schema {
+    MANAGED_OBJECT_STORAGE_SERVICE_SCHEMA.get_or_init(|| {
+        Schema::from_toml(include_str!("schemas/managed_object_storage_service.toml"))
+            .expect("built-in managed object storage service schema is invalid")
     })
 }
 
@@ -78,6 +88,7 @@ impl Provider for Client {
     ) -> Result<OperationResult, Box<dyn std::error::Error>> {
         match resource_type {
             "server" => server::create(self, properties),
+            "managed_object_storage_service" => managed_object_storage_service::create(self, properties),
             other => Err(format!("unknown upcloud resource type: {other}").into()),
         }
     }
@@ -89,6 +100,7 @@ impl Provider for Client {
     ) -> Result<OperationResult, Box<dyn std::error::Error>> {
         match resource_type {
             "server" => server::read(self, outputs),
+            "managed_object_storage_service" => managed_object_storage_service::read(self, outputs),
             other => Err(format!("unknown upcloud resource type: {other}").into()),
         }
     }
@@ -100,6 +112,7 @@ impl Provider for Client {
     ) -> Result<OperationResult, Box<dyn std::error::Error>> {
         match resource_type {
             "server" => server::delete(self, outputs),
+            "managed_object_storage_service" => managed_object_storage_service::delete(self, outputs),
             other => Err(format!("unknown upcloud resource type: {other}").into()),
         }
     }
@@ -112,6 +125,7 @@ impl Provider for Client {
     ) -> Result<OperationResult, Box<dyn std::error::Error>> {
         match resource_type {
             "server" => server::update(self, old_outputs, new_properties),
+            "managed_object_storage_service" => managed_object_storage_service::update(self, old_outputs, new_properties),
             other => Err(format!("update not supported for upcloud resource type: {other}").into()),
         }
     }
@@ -119,6 +133,7 @@ impl Provider for Client {
     fn resource_schema(&self, resource_type: &str) -> Option<&Schema> {
         match resource_type {
             "server" => Some(server_schema()),
+            "managed_object_storage_service" => Some(managed_object_storage_service_schema()),
             _ => None,
         }
     }
