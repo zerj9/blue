@@ -162,6 +162,16 @@ impl OutputRegistry {
         }
     }
 
+    /// Copy all entries from another registry into this one.
+    pub fn merge_from(&mut self, other: &OutputRegistry) {
+        for (key, outputs) in &other.entries {
+            let entry = self.entries.entry(key.clone()).or_default();
+            for (path, value) in outputs {
+                entry.insert(path.clone(), value.clone());
+            }
+        }
+    }
+
     /// Look up a value by source, name, and path.
     pub fn get(&self, source: &str, name: &str, path: &str) -> Option<&serde_json::Value> {
         let key = format!("{source}.{name}");

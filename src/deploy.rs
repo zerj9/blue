@@ -42,8 +42,14 @@ fn save_resource(
 fn resolve_properties(
     properties: &serde_json::Value,
     state: &State,
+    graph_registry: &OutputRegistry,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let mut output_reg = OutputRegistry::new();
+
+    // Include data outputs, parameters, and hook outputs from graph resolution
+    output_reg.merge_from(graph_registry);
+
+    // Include resource outputs from state (created during deploy traversal)
     for (n, snap) in &state.resources {
         if snap.status == ResourceStatus::Ready {
             if let Some(obj) = snap.outputs.as_object() {
@@ -91,6 +97,7 @@ pub fn execute(
     state: &mut State,
     registry: &mut ProviderRegistry,
     state_path: &Path,
+    graph_registry: &OutputRegistry,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Save data snapshots first
     state.data = changeset.data_snapshots.clone();
@@ -128,7 +135,7 @@ pub fn execute(
                 } => {
                     // Try in-place update first
                     if let Err(_) =
-                        update_resource(name, resource_type, changes, state, registry, state_path)
+                        update_resource(name, resource_type, changes, state, registry, state_path, graph_registry)
                     {
                         // If update fails or is not supported, fall back to delete + create
                         delete_resource(name, state, registry, state_path)?;
@@ -156,7 +163,7 @@ pub fn execute(
                 state::ResourceChange::Create { resource_type, .. }
                 | state::ResourceChange::Replace { resource_type, .. } => {
                     let props = &changeset.resource_snapshots[name].properties;
-                    create_resource(name, resource_type, props, state, registry, state_path)?;
+                    create_resource(name, resource_type, props, state, registry, state_path, graph_registry)?;
                 }
                 state::ResourceChange::Update {
                     resource_type,
@@ -168,7 +175,7 @@ pub fn execute(
                     if !state.resources.contains_key(name) {
                         // Resource was deleted in phase 1, now recreate it
                         let props = &changeset.resource_snapshots[name].properties;
-                        create_resource(name, resource_type, props, state, registry, state_path)?;
+                        create_resource(name, resource_type, props, state, registry, state_path, graph_registry)?;
                     }
                     // Otherwise, the resource was successfully updated in phase 1
                 }
@@ -187,8 +194,9 @@ fn create_resource(
     state: &mut State,
     registry: &mut ProviderRegistry,
     state_path: &Path,
+    graph_registry: &OutputRegistry,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let resolved_props = resolve_properties(properties, state)?;
+    let resolved_props = resolve_properties(properties, state, graph_registry)?;
 
     println!("Creating {name} ({resource_type})...");
 
@@ -378,6 +386,7 @@ fn update_resource(
     state: &mut State,
     registry: &mut ProviderRegistry,
     state_path: &Path,
+    graph_registry: &OutputRegistry,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if this update requires server stoppage
     let requires_stop = requires_stop_for_update(resource_type, property_changes, registry)?;
@@ -388,7 +397,7 @@ fn update_resource(
         .ok_or_else(|| format!("Resource {name} not found in state"))?;
     let old_outputs = old_snapshot.outputs.clone();
     let new_properties = apply_property_changes(&old_snapshot.properties, property_changes);
-    let resolved_props = resolve_properties(&new_properties, state)?;
+    let resolved_props = resolve_properties(&new_properties, state, graph_registry)?;
 
     if requires_stop {
         println!("Updating {name} ({resource_type}) - stop required...");

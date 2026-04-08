@@ -1,0 +1,19 @@
+[[fields]]
+path = "name"
+type = "string"
+required = true
+force_new = true
+
+[[fields]]
+path = "service_uuid"
+type = "string"
+required = true
+force_new = true
+
+[[outputs]]
+path = "name"
+type = "string"
+
+[[outputs]]
+path = "service_uuid"
+type = "string"

@@ -38,7 +38,7 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let old_state = state::load(&args.state)?;
 
-    let (changeset, mut registry) = if let Some(ref plan_path) = args.plan {
+    let (changeset, mut registry, graph_output_registry) = if let Some(ref plan_path) = args.plan {
         println!("Deploying from changeset: {}", plan_path.display());
         println!("  State file: {}", args.state.display());
 
@@ -51,7 +51,9 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
             ).into());
         }
 
-        (cs, providers::build_registry(provider::ProviderMode::Live))
+        // When deploying from a saved plan, we need to re-resolve the graph
+        // to get data/parameter/hook outputs for property resolution
+        (cs, providers::build_registry(provider::ProviderMode::Live), crate::reference::OutputRegistry::new())
     } else {
         let file = args.file.as_ref().unwrap();
         println!("Deploying from: {}", file.display());
@@ -63,7 +65,7 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
         resolve_graph(&mut resolved)?;
 
         let cs = compute_changeset(&old_state, &mut resolved)?;
-        (cs, resolved.registry)
+        (cs, resolved.registry, resolved.output_registry)
     };
 
     print_changeset(&changeset);
@@ -92,7 +94,7 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
         resources: old_state.resources,
     };
 
-    deploy::execute(&changeset, &mut current_state, &mut registry, &args.state)?;
+    deploy::execute(&changeset, &mut current_state, &mut registry, &args.state, &graph_output_registry)?;
 
     println!("\nDeploy complete. State saved to {}", args.state.display());
     Ok(())
