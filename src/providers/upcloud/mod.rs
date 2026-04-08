@@ -1,6 +1,7 @@
 pub mod managed_object_storage;
 pub mod managed_object_storage_bucket;
 pub mod managed_object_storage_service;
+pub mod managed_object_storage_user;
 pub mod server;
 pub mod storage;
 
@@ -54,6 +55,15 @@ fn managed_object_storage_bucket_schema() -> &'static Schema {
     })
 }
 
+static MANAGED_OBJECT_STORAGE_USER_SCHEMA: OnceLock<Schema> = OnceLock::new();
+
+fn managed_object_storage_user_schema() -> &'static Schema {
+    MANAGED_OBJECT_STORAGE_USER_SCHEMA.get_or_init(|| {
+        Schema::from_toml(include_str!("schemas/managed_object_storage_user.toml"))
+            .expect("built-in managed object storage user schema is invalid")
+    })
+}
+
 pub struct Client {
     pub(crate) http: reqwest::blocking::Client,
     pub(crate) base_url: String,
@@ -100,6 +110,7 @@ impl Provider for Client {
             "server" => server::create(self, properties),
             "managed_object_storage_service" => managed_object_storage_service::create(self, properties),
             "managed_object_storage_bucket" => managed_object_storage_bucket::create(self, properties),
+            "managed_object_storage_user" => managed_object_storage_user::create(self, properties),
             other => Err(format!("unknown upcloud resource type: {other}").into()),
         }
     }
@@ -113,6 +124,7 @@ impl Provider for Client {
             "server" => server::read(self, outputs),
             "managed_object_storage_service" => managed_object_storage_service::read(self, outputs),
             "managed_object_storage_bucket" => managed_object_storage_bucket::read(self, outputs),
+            "managed_object_storage_user" => managed_object_storage_user::read(self, outputs),
             other => Err(format!("unknown upcloud resource type: {other}").into()),
         }
     }
@@ -126,6 +138,7 @@ impl Provider for Client {
             "server" => server::delete(self, outputs),
             "managed_object_storage_service" => managed_object_storage_service::delete(self, outputs),
             "managed_object_storage_bucket" => managed_object_storage_bucket::delete(self, outputs),
+            "managed_object_storage_user" => managed_object_storage_user::delete(self, outputs),
             other => Err(format!("unknown upcloud resource type: {other}").into()),
         }
     }
@@ -140,6 +153,7 @@ impl Provider for Client {
             "server" => server::update(self, old_outputs, new_properties),
             "managed_object_storage_service" => managed_object_storage_service::update(self, old_outputs, new_properties),
             "managed_object_storage_bucket" => Err("buckets cannot be updated, they must be replaced".into()),
+            "managed_object_storage_user" => Err("users cannot be updated, they must be replaced".into()),
             other => Err(format!("update not supported for upcloud resource type: {other}").into()),
         }
     }
@@ -149,6 +163,7 @@ impl Provider for Client {
             "server" => Some(server_schema()),
             "managed_object_storage_service" => Some(managed_object_storage_service_schema()),
             "managed_object_storage_bucket" => Some(managed_object_storage_bucket_schema()),
+            "managed_object_storage_user" => Some(managed_object_storage_user_schema()),
             _ => None,
         }
     }
