@@ -26,8 +26,16 @@ pub struct Config {
     pub data: HashMap<String, DataSource>,
     #[serde(default)]
     pub resources: HashMap<String, Resource>,
+    #[serde(default)]
+    pub encryption: EncryptionConfig,
     #[serde(skip)]
     pub overrides: HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct EncryptionConfig {
+    #[serde(default)]
+    pub recipients: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

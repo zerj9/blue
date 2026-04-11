@@ -2,6 +2,7 @@ pub mod deploy;
 pub mod destroy;
 pub mod plan;
 pub mod refresh;
+pub mod rekey;
 pub mod validate;
 
 use std::collections::HashMap;
@@ -38,6 +39,15 @@ pub(crate) fn resolve_config(
             .map_err(|e| format!("failed to build dependency graph: {e}"))?;
 
     let registry = providers::build_registry(provider::ProviderMode::Live);
+
+    // Validate encryption config
+    let has_secrets = config.parameters.values().any(|p| p.secret);
+    if has_secrets && config.encryption.recipients.is_empty() {
+        return Err(
+            "secret parameters require encryption recipients to be configured in [encryption]"
+                .into(),
+        );
+    }
 
     // Validate hooks
     for (name, source) in &config.data {
@@ -258,8 +268,7 @@ fn resolve_parameter_node(
     // Resolve any refs in the default value (e.g., a parameter whose default references a data source)
     let json_value = toml_value_to_json(&raw_value);
     let text = json_value.to_string();
-    let resolved_text = reference::Ref::resolve_all(&text, &resolved.output_registry)
-        .map_err(|e| format!("parameter '{name}': {e}"))?;
+    let resolved_text = reference::Ref::resolve_all(&text, &resolved.output_registry);
     let resolved_json: serde_json::Value = serde_json::from_str(&resolved_text)
         .unwrap_or_else(|_| serde_json::Value::String(resolved_text));
 
@@ -389,6 +398,7 @@ pub(crate) fn compute_changeset(
         &resolved.config.resources,
         &resolved.output_registry,
         &secret_params,
+        &resolved.config.encryption.recipients,
     );
     let resource_changes = state::diff_resources(
         &old_state.resources,

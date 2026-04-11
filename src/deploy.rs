@@ -43,6 +43,7 @@ fn resolve_properties(
     properties: &serde_json::Value,
     state: &State,
     graph_registry: &OutputRegistry,
+    identities: Option<&[Box<dyn age::Identity>]>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let mut output_reg = OutputRegistry::new();
 
@@ -61,9 +62,109 @@ fn resolve_properties(
     }
 
     let props_str = properties.to_string();
-    let resolved_str = Ref::resolve_all(&props_str, &output_reg)
-        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-    Ok(serde_json::from_str(&resolved_str)?)
+    let resolved_str = Ref::resolve_all(&props_str, &output_reg);
+    let mut resolved: serde_json::Value = serde_json::from_str(&resolved_str)?;
+
+    // Decrypt any encrypted secrets
+    if let Some(ids) = identities {
+        decrypt_secrets(&mut resolved, ids)?;
+    }
+
+    Ok(resolved)
+}
+
+fn decrypt_secrets(
+    value: &mut serde_json::Value,
+    identities: &[Box<dyn age::Identity>],
+) -> Result<(), Box<dyn std::error::Error>> {
+    match value {
+        serde_json::Value::String(s) => {
+            if s.contains("<encrypted:") {
+                *s = decrypt_encrypted_markers(s, identities)?;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for v in map.values_mut() {
+                decrypt_secrets(v, identities)?;
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                decrypt_secrets(v, identities)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Find and replace all `<encrypted:hmac:b64>` markers within a string.
+fn decrypt_encrypted_markers(
+    text: &str,
+    identities: &[Box<dyn age::Identity>],
+) -> Result<String, Box<dyn std::error::Error>> {
+    use base64::Engine;
+    use std::io::Read;
+
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find("<encrypted:") {
+        result.push_str(&rest[..start]);
+        let after_open = &rest[start + "<encrypted:".len()..];
+
+        let end = after_open
+            .find('>')
+            .ok_or("malformed encrypted marker: missing closing >")?;
+        let inner = &after_open[..end];
+
+        // inner is "hmac_hex:base64_ciphertext"
+        if let Some((_hmac, b64)) = inner.split_once(':') {
+            let ciphertext = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|e| format!("failed to decode encrypted value: {e}"))?;
+
+            let identity_refs: Vec<&dyn age::Identity> = identities
+                .iter()
+                .map(|i| i.as_ref() as &dyn age::Identity)
+                .collect();
+
+            let decryptor = age::Decryptor::new(&ciphertext[..])
+                .map_err(|e| format!("failed to create decryptor: {e}"))?;
+
+            let mut reader = decryptor
+                .decrypt(identity_refs.into_iter())
+                .map_err(|e| format!("failed to decrypt: {e}"))?;
+
+            let mut decrypted = vec![];
+            reader
+                .read_to_end(&mut decrypted)
+                .map_err(|e| format!("failed to read decrypted data: {e}"))?;
+
+            let plaintext = String::from_utf8(decrypted)
+                .map_err(|e| format!("decrypted value is not valid UTF-8: {e}"))?;
+
+            result.push_str(&plaintext);
+        } else {
+            // Malformed, leave as-is
+            result.push_str(&rest[start..start + "<encrypted:".len() + end + 1]);
+        }
+
+        rest = &after_open[end + 1..];
+    }
+    result.push_str(rest);
+    Ok(result)
+}
+
+/// Load age identities from a file path.
+pub fn load_identities(
+    identity_path: &Path,
+) -> Result<Vec<Box<dyn age::Identity>>, Box<dyn std::error::Error>> {
+    let id_file = age::IdentityFile::from_file(identity_path.to_string_lossy().to_string())
+        .map_err(|e| format!("failed to read identity file '{}': {e}", identity_path.display()))?;
+    id_file
+        .into_identities()
+        .map_err(|e| format!("failed to parse identities: {e}").into())
 }
 
 /// Apply property changes to produce new properties.
@@ -98,6 +199,7 @@ pub fn execute(
     registry: &mut ProviderRegistry,
     state_path: &Path,
     graph_registry: &OutputRegistry,
+    identities: Option<&[Box<dyn age::Identity>]>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Save data snapshots first
     state.data = changeset.data_snapshots.clone();
@@ -135,7 +237,7 @@ pub fn execute(
                 } => {
                     // Try in-place update first
                     if let Err(_) =
-                        update_resource(name, resource_type, changes, state, registry, state_path, graph_registry)
+                        update_resource(name, resource_type, changes, state, registry, state_path, graph_registry, identities)
                     {
                         // If update fails or is not supported, fall back to delete + create
                         delete_resource(name, state, registry, state_path)?;
@@ -163,7 +265,7 @@ pub fn execute(
                 state::ResourceChange::Create { resource_type, .. }
                 | state::ResourceChange::Replace { resource_type, .. } => {
                     let props = &changeset.resource_snapshots[name].properties;
-                    create_resource(name, resource_type, props, state, registry, state_path, graph_registry)?;
+                    create_resource(name, resource_type, props, state, registry, state_path, graph_registry, identities)?;
                 }
                 state::ResourceChange::Update {
                     resource_type,
@@ -175,7 +277,7 @@ pub fn execute(
                     if !state.resources.contains_key(name) {
                         // Resource was deleted in phase 1, now recreate it
                         let props = &changeset.resource_snapshots[name].properties;
-                        create_resource(name, resource_type, props, state, registry, state_path, graph_registry)?;
+                        create_resource(name, resource_type, props, state, registry, state_path, graph_registry, identities)?;
                     }
                     // Otherwise, the resource was successfully updated in phase 1
                 }
@@ -195,8 +297,11 @@ fn create_resource(
     registry: &mut ProviderRegistry,
     state_path: &Path,
     graph_registry: &OutputRegistry,
+    identities: Option<&[Box<dyn age::Identity>]>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let resolved_props = resolve_properties(properties, state, graph_registry)?;
+    let resolved_props = resolve_properties(properties, state, graph_registry, identities)?;
+    // Resolve refs in properties for state storage (without decrypting secrets)
+    let state_props = resolve_properties(properties, state, graph_registry, None)?;
 
     println!("Creating {name} ({resource_type})...");
 
@@ -210,7 +315,7 @@ fn create_resource(
                 name,
                 resource_type,
                 ResourceStatus::Ready,
-                properties,
+                &state_props,
                 extracted,
                 state_path,
             )?;
@@ -223,7 +328,7 @@ fn create_resource(
                 name,
                 resource_type,
                 ResourceStatus::Creating,
-                properties,
+                &state_props,
                 extracted,
                 state_path,
             )?;
@@ -236,7 +341,7 @@ fn create_resource(
                 name,
                 resource_type,
                 ResourceStatus::Ready,
-                properties,
+                &state_props,
                 extracted,
                 state_path,
             )?;
@@ -387,6 +492,7 @@ fn update_resource(
     registry: &mut ProviderRegistry,
     state_path: &Path,
     graph_registry: &OutputRegistry,
+    identities: Option<&[Box<dyn age::Identity>]>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if this update requires server stoppage
     let requires_stop = requires_stop_for_update(resource_type, property_changes, registry)?;
@@ -397,7 +503,8 @@ fn update_resource(
         .ok_or_else(|| format!("Resource {name} not found in state"))?;
     let old_outputs = old_snapshot.outputs.clone();
     let new_properties = apply_property_changes(&old_snapshot.properties, property_changes);
-    let resolved_props = resolve_properties(&new_properties, state, graph_registry)?;
+    let resolved_props = resolve_properties(&new_properties, state, graph_registry, identities)?;
+    let state_props = resolve_properties(&new_properties, state, graph_registry, None)?;
 
     if requires_stop {
         println!("Updating {name} ({resource_type}) - stop required...");
@@ -448,7 +555,7 @@ fn update_resource(
 
     let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
     if let Some(snapshot) = state.resources.get_mut(name) {
-        snapshot.properties = new_properties;
+        snapshot.properties = state_props;
         snapshot.outputs = extracted;
         snapshot.status = if msg == "update in progress" && requires_stop {
             ResourceStatus::Updating

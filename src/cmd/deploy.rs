@@ -94,8 +94,24 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
         resources: old_state.resources,
     };
 
-    deploy::execute(&changeset, &mut current_state, &mut registry, &args.state, &graph_output_registry)?;
+    // Load age identities for decryption if needed
+    let identities = resolve_identity()?;
+    let id_refs = identities.as_deref();
+
+    deploy::execute(&changeset, &mut current_state, &mut registry, &args.state, &graph_output_registry, id_refs)?;
 
     println!("\nDeploy complete. State saved to {}", args.state.display());
     Ok(())
+}
+
+/// Resolve the age identity file path and load identities.
+/// Returns None if no identity is configured (no secrets to decrypt).
+fn resolve_identity() -> Result<Option<Vec<Box<dyn age::Identity>>>, Box<dyn std::error::Error>> {
+    match std::env::var("BLUE_AGE_IDENTITY") {
+        Ok(path) => {
+            let ids = deploy::load_identities(std::path::Path::new(&path))?;
+            Ok(Some(ids))
+        }
+        Err(_) => Ok(None),
+    }
 }

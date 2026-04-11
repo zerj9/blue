@@ -317,22 +317,21 @@ pub fn snapshot_resources_resolved(
     resources: &HashMap<String, config::Resource>,
     output_registry: &crate::reference::OutputRegistry,
     secret_params: &std::collections::HashSet<String>,
+    recipients: &[String],
 ) -> HashMap<String, ResourceSnapshot> {
     use crate::reference::Ref;
 
-    // Collect secret (param_name, plaintext_value) pairs for redaction
-    let secret_entries: Vec<(String, String)> = secret_params
+    // Build encrypted replacements for secret parameter refs
+    let secret_replacements: Vec<(String, String)> = secret_params
         .iter()
         .filter_map(|name| {
-            output_registry
-                .get("parameters", name, "value")
-                .map(|v| {
-                    let plaintext = match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    };
-                    (name.clone(), plaintext)
-                })
+            let plaintext = output_registry.get("parameters", name, "value")?;
+            let plaintext_str = match plaintext {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            let encrypted = encrypt_value(name, &plaintext_str, recipients)?;
+            Some((name.clone(), encrypted))
         })
         .collect();
 
@@ -341,17 +340,22 @@ pub fn snapshot_resources_resolved(
         let properties = match &resource.properties {
             Some(props) => {
                 let json = toml_to_json(props);
-                // Resolve any {{...}} refs in the serialized properties
-                let text = json.to_string();
-                match Ref::resolve_all(&text, output_registry) {
-                    Ok(resolved) => {
-                        let mut json: serde_json::Value =
-                            serde_json::from_str(&resolved).unwrap_or(json);
-                        redact_secrets(&mut json, &secret_entries);
-                        json
+                let mut text = json.to_string();
+
+                // Replace secret parameter refs with encrypted values before resolving
+                for (param_name, encrypted) in &secret_replacements {
+                    let patterns = [
+                        format!("{{{{ parameters.{param_name} }}}}"),
+                        format!("{{{{parameters.{param_name}}}}}"),
+                    ];
+                    for pattern in &patterns {
+                        text = text.replace(pattern, encrypted);
                     }
-                    Err(_) => json, // Fall back to unresolved if resolution fails
                 }
+
+                // Resolve remaining refs (data, non-secret params, etc.)
+                let resolved = Ref::resolve_all(&text, output_registry);
+                serde_json::from_str(&resolved).unwrap_or(json)
             }
             None => serde_json::Value::Object(Default::default()),
         };
@@ -368,41 +372,43 @@ pub fn snapshot_resources_resolved(
     snapshots
 }
 
-/// Replaces secret values with `<secret:HMAC-SHA256>` using the parameter name as the HMAC key.
-/// Using the parameter name as key means the same secret value produces a stable hash per parameter,
-/// allowing the diff logic to detect actual secret changes (e.g. token rotation).
-fn redact_secrets(
-    value: &mut serde_json::Value,
-    secret_entries: &[(String, String)], // (param_name, plaintext_value)
-) {
+/// Encrypt a single secret value with age, returning `<encrypted:hmac:b64>`.
+fn encrypt_value(param_name: &str, plaintext: &str, recipients: &[String]) -> Option<String> {
+    use base64::Engine;
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
+    use std::io::Write;
 
-    match value {
-        serde_json::Value::String(s) => {
-            for (param_name, secret_val) in secret_entries {
-                if s == secret_val {
-                    let mut mac = Hmac::<Sha256>::new_from_slice(param_name.as_bytes())
-                        .expect("HMAC accepts any key size");
-                    mac.update(s.as_bytes());
-                    let hash_hex = hex::encode(mac.finalize().into_bytes());
-                    *s = format!("<secret:{hash_hex}>");
-                    break;
-                }
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for v in map.values_mut() {
-                redact_secrets(v, secret_entries);
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            for v in arr {
-                redact_secrets(v, secret_entries);
-            }
-        }
-        _ => {}
+    if recipients.is_empty() {
+        return None;
     }
+
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(param_name.as_bytes()).expect("HMAC accepts any key size");
+    mac.update(plaintext.as_bytes());
+    let hmac_hex = hex::encode(mac.finalize().into_bytes());
+
+    let parsed_recipients: Vec<Box<dyn age::Recipient + Send>> = recipients
+        .iter()
+        .filter_map(|r| {
+            r.parse::<age::x25519::Recipient>()
+                .ok()
+                .map(|r| Box::new(r) as Box<dyn age::Recipient + Send>)
+        })
+        .collect();
+    let recipient_refs: Vec<&dyn age::Recipient> = parsed_recipients
+        .iter()
+        .map(|r| r.as_ref() as &dyn age::Recipient)
+        .collect();
+
+    let encryptor = age::Encryptor::with_recipients(recipient_refs.into_iter()).ok()?;
+    let mut encrypted = vec![];
+    let mut writer = encryptor.wrap_output(&mut encrypted).ok()?;
+    writer.write_all(plaintext.as_bytes()).ok()?;
+    writer.finish().ok()?;
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted);
+    Some(format!("<encrypted:{hmac_hex}:{b64}>"))
 }
 
 fn diff_properties(

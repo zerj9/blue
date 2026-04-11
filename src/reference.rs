@@ -100,22 +100,26 @@ impl Ref {
     }
 
     /// Resolve all `{{...}}` references in text using the output registry.
-    /// Non-ref placeholders (e.g. parameters) are left as-is.
-    pub fn resolve_all(text: &str, registry: &OutputRegistry) -> Result<String, String> {
+    /// Refs that can't be resolved are left as-is for later resolution.
+    /// Non-ref placeholders are also left as-is.
+    pub fn resolve_all(text: &str, registry: &OutputRegistry) -> String {
         let mut result = String::with_capacity(text.len());
         let mut rest = text;
 
         while let Some(start) = rest.find("{{") {
             result.push_str(&rest[..start]);
             let after_open = &rest[start + 2..];
-            let end = after_open
-                .find("}}")
-                .ok_or_else(|| format!("unclosed '{{{{' at byte {start}"))?;
+            let end = match after_open.find("}}") {
+                Some(e) => e,
+                None => break,
+            };
             let inner = after_open[..end].trim();
 
             if let Some(r) = Self::parse(inner) {
-                let value = r.resolve(registry)?;
-                result.push_str(&value);
+                match r.resolve(registry) {
+                    Ok(value) => result.push_str(&value),
+                    Err(_) => result.push_str(&rest[start..start + 2 + end + 2]),
+                }
             } else {
                 // Not a data/resource ref — leave as-is
                 result.push_str(&rest[start..start + 2 + end + 2]);
@@ -124,7 +128,7 @@ impl Ref {
             rest = &after_open[end + 2..];
         }
         result.push_str(rest);
-        Ok(result)
+        result
     }
 }
 
@@ -286,7 +290,7 @@ mod tests {
         reg.insert("data", "ubuntu", "uuid", serde_json::json!("abc-123"));
 
         let text = r#"storage = "{{ data.ubuntu.uuid }}""#;
-        let resolved = Ref::resolve_all(text, &reg).unwrap();
+        let resolved = Ref::resolve_all(text, &reg);
         assert_eq!(resolved, r#"storage = "abc-123""#);
     }
 
@@ -294,7 +298,7 @@ mod tests {
     fn resolve_all_leaves_unknown_placeholders() {
         let reg = OutputRegistry::new();
         let text = r#"size = "{{ unknown_thing }}""#;
-        let resolved = Ref::resolve_all(text, &reg).unwrap();
+        let resolved = Ref::resolve_all(text, &reg);
         assert_eq!(resolved, text);
     }
 
@@ -304,7 +308,7 @@ mod tests {
         reg.insert("parameters", "disk_size", "value", serde_json::json!("10"));
 
         let text = r#"size = "{{ parameters.disk_size }}""#;
-        let resolved = Ref::resolve_all(text, &reg).unwrap();
+        let resolved = Ref::resolve_all(text, &reg);
         assert_eq!(resolved, r#"size = "10""#);
     }
 

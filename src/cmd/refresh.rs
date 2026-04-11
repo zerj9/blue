@@ -45,10 +45,12 @@ pub fn run(args: &RefreshArgs) -> Result<(), Box<dyn std::error::Error>> {
         print_data_changes(&data_changes);
     }
 
-    // Refresh resources with Ready status
+    // Refresh resources with Ready or Failed status
     let mut new_resources = old_state.resources.clone();
     for (name, snap) in &old_state.resources {
-        if snap.status == state::ResourceStatus::Ready {
+        if snap.status == state::ResourceStatus::Ready
+            || snap.status == state::ResourceStatus::Failed
+        {
             match resolved
                 .registry
                 .read_resource(&snap.resource_type, &snap.outputs)
@@ -69,7 +71,9 @@ pub fn run(args: &RefreshArgs) -> Result<(), Box<dyn std::error::Error>> {
                         }
                         None => outputs,
                     };
-                    new_resources.get_mut(name).unwrap().outputs = extracted;
+                    let entry = new_resources.get_mut(name).unwrap();
+                    entry.outputs = extracted;
+                    entry.status = state::ResourceStatus::Ready;
                     println!("  {name}: refreshed");
                 }
                 Ok(provider::OperationResult::Failed { error }) => {
@@ -95,6 +99,7 @@ pub fn run(args: &RefreshArgs) -> Result<(), Box<dyn std::error::Error>> {
             &resolved.config.resources,
             &resolved.output_registry,
             &secret_params,
+            &resolved.config.encryption.recipients,
         );
         for (name, snap) in &mut new_resources {
             if let Some(config_snap) = config_snapshots.get(name) {

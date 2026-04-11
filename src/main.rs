@@ -34,6 +34,8 @@ enum Command {
     Destroy(cmd::destroy::DestroyArgs),
     /// Re-resolve data sources and update the state file
     Refresh(cmd::refresh::RefreshArgs),
+    /// Re-encrypt state secrets with the current recipient list
+    Rekey(cmd::rekey::RekeyArgs),
 }
 
 fn main() {
@@ -45,6 +47,7 @@ fn main() {
         Command::Deploy(args) => cmd::deploy::run(&args),
         Command::Destroy(args) => cmd::destroy::run(&args),
         Command::Refresh(args) => cmd::refresh::run(&args),
+        Command::Rekey(args) => cmd::rekey::run(&args),
     };
 
     if let Err(e) = result {
