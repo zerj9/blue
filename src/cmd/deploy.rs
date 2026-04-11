@@ -62,7 +62,7 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         let mut resolved = resolve_config(file, &args.var, args.var_file.as_deref())?;
         print_config(&resolved.config);
-        resolve_graph(&mut resolved)?;
+        resolve_graph(&mut resolved, &old_state.resources)?;
 
         let cs = compute_changeset(&old_state, &mut resolved)?;
         (cs, resolved.registry, resolved.output_registry)

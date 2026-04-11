@@ -40,7 +40,7 @@ pub fn run(args: &PlanArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut resolved = resolve_config(&args.file, &args.var, args.var_file.as_deref())?;
     print_config(&resolved.config);
 
-    resolve_graph(&mut resolved)?;
+    resolve_graph(&mut resolved, &old_state.resources)?;
 
     let changeset = compute_changeset(&old_state, &mut resolved)?;
     print_changeset(&changeset);

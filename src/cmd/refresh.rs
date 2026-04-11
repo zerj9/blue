@@ -33,7 +33,7 @@ pub fn run(args: &RefreshArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     // Resolve data sources via graph-driven resolution
     let mut resolved = resolve_config(&args.file, &args.var, args.var_file.as_deref())?;
-    resolve_graph(&mut resolved)?;
+    resolve_graph(&mut resolved, &old_state.resources)?;
 
     let data_vars = resolved.output_registry.to_data_vars();
     let new_data = state::snapshot_data(&resolved.config.data, &data_vars);
@@ -100,6 +100,7 @@ pub fn run(args: &RefreshArgs) -> Result<(), Box<dyn std::error::Error>> {
             &resolved.output_registry,
             &secret_params,
             &resolved.config.encryption.recipients,
+            &old_state.resources,
         );
         for (name, snap) in &mut new_resources {
             if let Some(config_snap) = config_snapshots.get(name) {

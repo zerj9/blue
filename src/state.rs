@@ -318,10 +318,16 @@ pub fn snapshot_resources_resolved(
     output_registry: &crate::reference::OutputRegistry,
     secret_params: &std::collections::HashSet<String>,
     recipients: &[String],
+    old_resources: &HashMap<String, ResourceSnapshot>,
 ) -> HashMap<String, ResourceSnapshot> {
     use crate::reference::Ref;
 
-    // Build encrypted replacements for secret parameter refs
+    // Collect existing encrypted markers from old state, keyed by HMAC
+    let old_markers = collect_encrypted_markers(old_resources);
+
+    // Build encrypted replacements for secret parameter refs.
+    // Reuse old markers when the HMAC matches (secret unchanged) to avoid
+    // non-deterministic age ciphertext causing spurious diffs.
     let secret_replacements: Vec<(String, String)> = secret_params
         .iter()
         .filter_map(|name| {
@@ -330,6 +336,10 @@ pub fn snapshot_resources_resolved(
                 serde_json::Value::String(s) => s.clone(),
                 other => other.to_string(),
             };
+            let hmac_hex = compute_hmac(name, &plaintext_str);
+            if let Some(old_marker) = old_markers.get(&hmac_hex) {
+                return Some((name.clone(), old_marker.clone()));
+            }
             let encrypted = encrypt_value(name, &plaintext_str, recipients)?;
             Some((name.clone(), encrypted))
         })
@@ -372,21 +382,72 @@ pub fn snapshot_resources_resolved(
     snapshots
 }
 
+/// Compute HMAC-SHA256 of a secret value, keyed by parameter name.
+fn compute_hmac(param_name: &str, plaintext: &str) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(param_name.as_bytes()).expect("HMAC accepts any key size");
+    mac.update(plaintext.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+
+/// Collect all `<encrypted:hmac:b64>` markers from old state resources, keyed by HMAC.
+fn collect_encrypted_markers(
+    resources: &HashMap<String, ResourceSnapshot>,
+) -> HashMap<String, String> {
+    let mut markers = HashMap::new();
+    for snap in resources.values() {
+        collect_encrypted_markers_from_value(&snap.properties, &mut markers);
+    }
+    markers
+}
+
+fn collect_encrypted_markers_from_value(
+    value: &serde_json::Value,
+    markers: &mut HashMap<String, String>,
+) {
+    match value {
+        serde_json::Value::String(s) => {
+            let mut rest = s.as_str();
+            while let Some(start) = rest.find("<encrypted:") {
+                let after = &rest[start + "<encrypted:".len()..];
+                if let Some(end) = after.find('>') {
+                    let inner = &after[..end];
+                    if let Some((hmac, _)) = inner.split_once(':') {
+                        let full = &rest[start..start + "<encrypted:".len() + end + 1];
+                        markers.entry(hmac.to_string()).or_insert_with(|| full.to_string());
+                    }
+                    rest = &after[end + 1..];
+                } else {
+                    break;
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for v in map.values() {
+                collect_encrypted_markers_from_value(v, markers);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                collect_encrypted_markers_from_value(v, markers);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Encrypt a single secret value with age, returning `<encrypted:hmac:b64>`.
 fn encrypt_value(param_name: &str, plaintext: &str, recipients: &[String]) -> Option<String> {
     use base64::Engine;
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
     use std::io::Write;
 
     if recipients.is_empty() {
         return None;
     }
 
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(param_name.as_bytes()).expect("HMAC accepts any key size");
-    mac.update(plaintext.as_bytes());
-    let hmac_hex = hex::encode(mac.finalize().into_bytes());
+    let hmac_hex = compute_hmac(param_name, plaintext);
 
     let parsed_recipients: Vec<Box<dyn age::Recipient + Send>> = recipients
         .iter()

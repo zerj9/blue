@@ -161,8 +161,12 @@ pub(crate) fn resolve_config(
 
 /// Walk the dependency graph in topological order, resolving data sources
 /// and executing hooks just-in-time. Populates the output registry.
+/// Resource outputs from the existing state are also loaded so that
+/// cross-resource references (e.g. `{{ resources.X.uuid }}`) resolve
+/// during planning.
 pub(crate) fn resolve_graph(
     resolved: &mut ResolvedConfig,
+    existing_resources: &HashMap<String, state::ResourceSnapshot>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let order = resolved.graph.topological_sort()?;
 
@@ -176,6 +180,15 @@ pub(crate) fn resolve_graph(
             }
             graph::NodeKind::Resource => {
                 resolve_resource_hooks(name, resolved)?;
+                if let Some(snap) = existing_resources.get(name.as_str()) {
+                    if let serde_json::Value::Object(map) = &snap.outputs {
+                        for (key, value) in map {
+                            resolved
+                                .output_registry
+                                .insert("resources", name, key, value.clone());
+                        }
+                    }
+                }
             }
         }
     }
@@ -399,6 +412,7 @@ pub(crate) fn compute_changeset(
         &resolved.output_registry,
         &secret_params,
         &resolved.config.encryption.recipients,
+        &old_state.resources,
     );
     let resource_changes = state::diff_resources(
         &old_state.resources,
