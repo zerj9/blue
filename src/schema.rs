@@ -225,6 +225,10 @@ impl Schema {
         Ok(Schema { fields, outputs })
     }
 
+    pub fn fields(&self) -> &[FieldDef] {
+        &self.fields
+    }
+
     pub fn output(&self, path: &str) -> Option<&OutputDef> {
         self.outputs.iter().find(|o| o.path == path)
     }

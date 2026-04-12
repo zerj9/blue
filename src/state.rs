@@ -473,6 +473,42 @@ pub fn encrypt_value(hmac_key: &str, plaintext: &str, recipients: &[String]) -> 
     Some(format!("<encrypted:{hmac_hex}:{b64}>"))
 }
 
+/// Build effective old properties by overlaying output values for fields that
+/// appear in both the property and output schemas. This detects drift where the
+/// actual resource state (outputs) diverges from the stored properties.
+fn effective_properties(
+    properties: &serde_json::Value,
+    outputs: &serde_json::Value,
+    schema: Option<&crate::schema::Schema>,
+) -> serde_json::Value {
+    let Some(schema) = schema else {
+        return properties.clone();
+    };
+
+    let output_paths: std::collections::HashSet<&str> =
+        schema.outputs.iter().map(|o| o.path.as_str()).collect();
+    let property_paths: std::collections::HashSet<&str> =
+        schema.fields().iter().map(|f| f.path.as_str()).collect();
+
+    // Fields that exist in both schemas
+    let overlapping: Vec<&str> = output_paths.intersection(&property_paths).copied().collect();
+    if overlapping.is_empty() {
+        return properties.clone();
+    }
+
+    let mut result = properties.clone();
+    if let (serde_json::Value::Object(result_map), serde_json::Value::Object(output_map)) =
+        (&mut result, outputs)
+    {
+        for field in overlapping {
+            if let Some(output_val) = output_map.get(field) {
+                result_map.insert(field.to_string(), output_val.clone());
+            }
+        }
+    }
+    result
+}
+
 fn diff_properties(
     old: &serde_json::Value,
     new: &serde_json::Value,
@@ -542,8 +578,9 @@ pub fn diff_resources(
             Some(old_snap) => {
                 if old_snap.resource_type != new_snap.resource_type {
                     let schema = registry.resource_schema(&new_snap.resource_type)?;
+                    let effective_old = effective_properties(&old_snap.properties, &old_snap.outputs, schema);
                     let prop_changes =
-                        diff_properties(&old_snap.properties, &new_snap.properties, schema);
+                        diff_properties(&effective_old, &new_snap.properties, schema);
                     changes.push(ResourceChange::Replace {
                         name: name.clone(),
                         resource_type: new_snap.resource_type.clone(),
@@ -551,8 +588,9 @@ pub fn diff_resources(
                     });
                 } else {
                     let schema = registry.resource_schema(&new_snap.resource_type)?;
+                    let effective_old = effective_properties(&old_snap.properties, &old_snap.outputs, schema);
                     let prop_changes =
-                        diff_properties(&old_snap.properties, &new_snap.properties, schema);
+                        diff_properties(&effective_old, &new_snap.properties, schema);
                     if prop_changes.is_empty() {
                         changes.push(ResourceChange::Unchanged { name: name.clone() });
                     } else {

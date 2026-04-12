@@ -113,7 +113,7 @@ pub fn read(
         .unwrap_or("");
 
     match state {
-        "running" => Ok(OperationResult::Complete {
+        "running" | "stopped" => Ok(OperationResult::Complete {
             outputs: resp_body,
         }),
         _ => Ok(OperationResult::InProgress {
