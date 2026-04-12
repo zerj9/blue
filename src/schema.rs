@@ -37,6 +37,7 @@ pub struct FieldDef {
 pub struct OutputDef {
     pub path: String,
     pub output_type: FieldType,
+    pub secret: bool,
 }
 
 pub struct Schema {
@@ -204,6 +205,8 @@ struct RawOutputDef {
     path: String,
     #[serde(rename = "type")]
     output_type: FieldType,
+    #[serde(default)]
+    secret: bool,
 }
 
 impl Schema {
@@ -216,6 +219,7 @@ impl Schema {
             .map(|raw| OutputDef {
                 path: raw.path,
                 output_type: raw.output_type,
+                secret: raw.secret,
             })
             .collect();
         Ok(Schema { fields, outputs })

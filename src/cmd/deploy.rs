@@ -38,7 +38,7 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let old_state = state::load(&args.state)?;
 
-    let (changeset, mut registry, graph_output_registry) = if let Some(ref plan_path) = args.plan {
+    let (changeset, mut registry, graph_output_registry, recipients) = if let Some(ref plan_path) = args.plan {
         println!("Deploying from changeset: {}", plan_path.display());
         println!("  State file: {}", args.state.display());
 
@@ -53,7 +53,7 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         // When deploying from a saved plan, we need to re-resolve the graph
         // to get data/parameter/hook outputs for property resolution
-        (cs, providers::build_registry(provider::ProviderMode::Live), crate::reference::OutputRegistry::new())
+        (cs, providers::build_registry(provider::ProviderMode::Live), crate::reference::OutputRegistry::new(), vec![])
     } else {
         let file = args.file.as_ref().unwrap();
         println!("Deploying from: {}", file.display());
@@ -65,7 +65,8 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
         resolve_graph(&mut resolved, &old_state.resources)?;
 
         let cs = compute_changeset(&old_state, &mut resolved)?;
-        (cs, resolved.registry, resolved.output_registry)
+        let r = resolved.config.encryption.recipients.clone();
+        (cs, resolved.registry, resolved.output_registry, r)
     };
 
     print_changeset(&changeset);
@@ -98,7 +99,7 @@ pub fn run(args: &DeployArgs) -> Result<(), Box<dyn std::error::Error>> {
     let identities = resolve_identity()?;
     let id_refs = identities.as_deref();
 
-    deploy::execute(&changeset, &mut current_state, &mut registry, &args.state, &graph_output_registry, id_refs)?;
+    deploy::execute(&changeset, &mut current_state, &mut registry, &args.state, &graph_output_registry, id_refs, &recipients)?;
 
     println!("\nDeploy complete. State saved to {}", args.state.display());
     Ok(())

@@ -63,8 +63,18 @@ pub fn run(args: &RefreshArgs) -> Result<(), Box<dyn std::error::Error>> {
                         .flatten();
                     let extracted = match schema {
                         Some(s) => {
-                            let map =
+                            // Preserve secret outputs from old state (API won't return them)
+                            let mut map =
                                 schema::extract_outputs(&outputs, &s.outputs).unwrap_or_default();
+                            for output_def in &s.outputs {
+                                if output_def.secret && !map.contains_key(&output_def.path) {
+                                    if let serde_json::Value::Object(old_map) = &snap.outputs {
+                                        if let Some(old_val) = old_map.get(&output_def.path) {
+                                            map.insert(output_def.path.clone(), old_val.clone());
+                                        }
+                                    }
+                                }
+                            }
                             let obj: serde_json::Map<String, serde_json::Value> =
                                 map.into_iter().collect();
                             serde_json::Value::Object(obj)

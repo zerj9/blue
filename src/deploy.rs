@@ -200,6 +200,7 @@ pub fn execute(
     state_path: &Path,
     graph_registry: &OutputRegistry,
     identities: Option<&[Box<dyn age::Identity>]>,
+    recipients: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Save data snapshots first
     state.data = changeset.data_snapshots.clone();
@@ -237,7 +238,7 @@ pub fn execute(
                 } => {
                     // Try in-place update first
                     if let Err(_) =
-                        update_resource(name, resource_type, changes, state, registry, state_path, graph_registry, identities)
+                        update_resource(name, resource_type, changes, state, registry, state_path, graph_registry, identities, recipients)
                     {
                         // If update fails or is not supported, fall back to delete + create
                         delete_resource(name, state, registry, state_path)?;
@@ -265,7 +266,7 @@ pub fn execute(
                 state::ResourceChange::Create { resource_type, .. }
                 | state::ResourceChange::Replace { resource_type, .. } => {
                     let props = &changeset.resource_snapshots[name].properties;
-                    create_resource(name, resource_type, props, state, registry, state_path, graph_registry, identities)?;
+                    create_resource(name, resource_type, props, state, registry, state_path, graph_registry, identities, recipients)?;
                 }
                 state::ResourceChange::Update {
                     resource_type,
@@ -277,7 +278,7 @@ pub fn execute(
                     if !state.resources.contains_key(name) {
                         // Resource was deleted in phase 1, now recreate it
                         let props = &changeset.resource_snapshots[name].properties;
-                        create_resource(name, resource_type, props, state, registry, state_path, graph_registry, identities)?;
+                        create_resource(name, resource_type, props, state, registry, state_path, graph_registry, identities, recipients)?;
                     }
                     // Otherwise, the resource was successfully updated in phase 1
                 }
@@ -298,6 +299,7 @@ fn create_resource(
     state_path: &Path,
     graph_registry: &OutputRegistry,
     identities: Option<&[Box<dyn age::Identity>]>,
+    recipients: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolved_props = resolve_properties(properties, state, graph_registry, identities)?;
     // Resolve refs in properties for state storage (without decrypting secrets)
@@ -309,7 +311,8 @@ fn create_resource(
 
     match result {
         OperationResult::Complete { outputs } => {
-            let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+            let mut extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+            encrypt_secret_outputs(name, resource_type, &mut extracted, registry, recipients)?;
             save_resource(
                 state,
                 name,
@@ -322,7 +325,8 @@ fn create_resource(
             println!("  {name}: created");
         }
         OperationResult::InProgress { outputs } => {
-            let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+            let mut extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+            encrypt_secret_outputs(name, resource_type, &mut extracted, registry, recipients)?;
             save_resource(
                 state,
                 name,
@@ -335,7 +339,8 @@ fn create_resource(
             poll_until_ready(name, resource_type, state, registry, state_path)?;
         }
         OperationResult::Updating { outputs } => {
-            let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+            let mut extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+            encrypt_secret_outputs(name, resource_type, &mut extracted, registry, recipients)?;
             save_resource(
                 state,
                 name,
@@ -493,6 +498,7 @@ fn update_resource(
     state_path: &Path,
     graph_registry: &OutputRegistry,
     identities: Option<&[Box<dyn age::Identity>]>,
+    recipients: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if this update requires server stoppage
     let requires_stop = requires_stop_for_update(resource_type, property_changes, registry)?;
@@ -553,7 +559,9 @@ fn update_resource(
         }
     };
 
-    let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+    let mut extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+    preserve_secret_outputs(&mut extracted, &old_outputs, resource_type, registry)?;
+    encrypt_secret_outputs(name, resource_type, &mut extracted, registry, recipients)?;
     if let Some(snapshot) = state.resources.get_mut(name) {
         snapshot.properties = state_props;
         snapshot.outputs = extracted;
@@ -596,12 +604,13 @@ fn poll_until_ready(
             return Err(format!("{name}: timed out waiting for resource to be ready").into());
         }
 
-        let outputs = &state.resources[name].outputs;
-        let result = registry.read_resource(resource_type, outputs)?;
+        let old_outputs = state.resources[name].outputs.clone();
+        let result = registry.read_resource(resource_type, &old_outputs)?;
 
         match result {
             OperationResult::Complete { outputs } => {
-                let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+                let mut extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+                preserve_secret_outputs(&mut extracted, &old_outputs, resource_type, registry)?;
                 let snap = state.resources.get_mut(name).unwrap();
                 snap.status = ResourceStatus::Ready;
                 snap.outputs = extracted;
@@ -610,7 +619,8 @@ fn poll_until_ready(
                 return Ok(());
             }
             OperationResult::InProgress { outputs } | OperationResult::Updating { outputs } => {
-                let extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+                let mut extracted = extract_resource_outputs(resource_type, &outputs, registry)?;
+                preserve_secret_outputs(&mut extracted, &old_outputs, resource_type, registry)?;
                 state.resources.get_mut(name).unwrap().outputs = extracted;
                 state::save_ref(state, state_path)?;
             }
@@ -638,4 +648,60 @@ fn extract_resource_outputs(
         }
         None => Ok(raw_outputs.clone()),
     }
+}
+
+/// Encrypt output fields marked as `secret` in the schema.
+fn encrypt_secret_outputs(
+    resource_name: &str,
+    resource_type: &str,
+    outputs: &mut serde_json::Value,
+    registry: &mut ProviderRegistry,
+    recipients: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if recipients.is_empty() {
+        return Ok(());
+    }
+    let schema = registry.resource_schema(resource_type)?;
+    let Some(schema) = schema else { return Ok(()) };
+
+    if let serde_json::Value::Object(map) = outputs {
+        for output_def in &schema.outputs {
+            if output_def.secret {
+                if let Some(serde_json::Value::String(val)) = map.get(&output_def.path) {
+                    let hmac_key = format!("{resource_name}.{}", output_def.path);
+                    if let Some(encrypted) = state::encrypt_value(&hmac_key, val, recipients) {
+                        map.insert(
+                            output_def.path.clone(),
+                            serde_json::Value::String(encrypted),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Preserve secret outputs from old state when the API read doesn't return them.
+fn preserve_secret_outputs(
+    outputs: &mut serde_json::Value,
+    old_outputs: &serde_json::Value,
+    resource_type: &str,
+    registry: &mut ProviderRegistry,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = registry.resource_schema(resource_type)?;
+    let Some(schema) = schema else { return Ok(()) };
+
+    if let (serde_json::Value::Object(new_map), serde_json::Value::Object(old_map)) =
+        (outputs, old_outputs)
+    {
+        for output_def in &schema.outputs {
+            if output_def.secret && !new_map.contains_key(&output_def.path) {
+                if let Some(old_val) = old_map.get(&output_def.path) {
+                    new_map.insert(output_def.path.clone(), old_val.clone());
+                }
+            }
+        }
+    }
+    Ok(())
 }

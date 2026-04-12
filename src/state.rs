@@ -439,7 +439,8 @@ fn collect_encrypted_markers_from_value(
 }
 
 /// Encrypt a single secret value with age, returning `<encrypted:hmac:b64>`.
-fn encrypt_value(param_name: &str, plaintext: &str, recipients: &[String]) -> Option<String> {
+/// The `hmac_key` is used to produce a stable fingerprint for change detection.
+pub fn encrypt_value(hmac_key: &str, plaintext: &str, recipients: &[String]) -> Option<String> {
     use base64::Engine;
     use std::io::Write;
 
@@ -447,7 +448,7 @@ fn encrypt_value(param_name: &str, plaintext: &str, recipients: &[String]) -> Op
         return None;
     }
 
-    let hmac_hex = compute_hmac(param_name, plaintext);
+    let hmac_hex = compute_hmac(hmac_key, plaintext);
 
     let parsed_recipients: Vec<Box<dyn age::Recipient + Send>> = recipients
         .iter()
