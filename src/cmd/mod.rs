@@ -510,10 +510,16 @@ fn print_property_changes(changes: &[state::PropertyChange]) {
                 } else {
                     ""
                 };
-                println!("      + {field} = {}{annotation}", json_display(new_value));
+                println!(
+                    "      + {field}: (not set) -> {}{annotation}",
+                    json_display(new_value)
+                );
             }
             state::PropertyChange::Removed { field, old_value } => {
-                println!("      - {field} = {}", json_display(old_value));
+                println!(
+                    "      - {field}: {} -> (removed)",
+                    json_display(old_value)
+                );
             }
             state::PropertyChange::Modified {
                 field,

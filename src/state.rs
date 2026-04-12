@@ -509,6 +509,27 @@ fn effective_properties(
     result
 }
 
+fn apply_defaults(
+    properties: &serde_json::Value,
+    schema: Option<&crate::schema::Schema>,
+) -> serde_json::Value {
+    let Some(schema) = schema else {
+        return properties.clone();
+    };
+
+    let mut result = properties.clone();
+    if let serde_json::Value::Object(map) = &mut result {
+        for field in schema.fields() {
+            if let Some(ref default) = field.default {
+                if !map.contains_key(&field.path) {
+                    map.insert(field.path.clone(), default.clone());
+                }
+            }
+        }
+    }
+    result
+}
+
 fn diff_properties(
     old: &serde_json::Value,
     new: &serde_json::Value,
@@ -579,8 +600,9 @@ pub fn diff_resources(
                 if old_snap.resource_type != new_snap.resource_type {
                     let schema = registry.resource_schema(&new_snap.resource_type)?;
                     let effective_old = effective_properties(&old_snap.properties, &old_snap.outputs, schema);
+                    let effective_new = apply_defaults(&new_snap.properties, schema);
                     let prop_changes =
-                        diff_properties(&effective_old, &new_snap.properties, schema);
+                        diff_properties(&effective_old, &effective_new, schema);
                     changes.push(ResourceChange::Replace {
                         name: name.clone(),
                         resource_type: new_snap.resource_type.clone(),
@@ -589,8 +611,9 @@ pub fn diff_resources(
                 } else {
                     let schema = registry.resource_schema(&new_snap.resource_type)?;
                     let effective_old = effective_properties(&old_snap.properties, &old_snap.outputs, schema);
+                    let effective_new = apply_defaults(&new_snap.properties, schema);
                     let prop_changes =
-                        diff_properties(&effective_old, &new_snap.properties, schema);
+                        diff_properties(&effective_old, &effective_new, schema);
                     if prop_changes.is_empty() {
                         changes.push(ResourceChange::Unchanged { name: name.clone() });
                     } else {

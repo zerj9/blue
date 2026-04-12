@@ -200,7 +200,7 @@ pub fn read(
         .unwrap_or("unknown");
 
     match state {
-        "started" => Ok(OperationResult::Complete {
+        "started" | "stopped" => Ok(OperationResult::Complete {
             outputs: server.clone(),
         }),
         "maintenance" => Ok(OperationResult::InProgress {
@@ -321,9 +321,7 @@ pub fn update(
 
     // Build the update request
     let mut update_request = serde_json::json!({
-        "server": {
-            "uuid": uuid
-        }
+        "server": {}
     });
 
     // Add simple updatable properties (can be updated on running servers)
@@ -385,59 +383,173 @@ pub fn update(
     // Note: Storage devices and IP addresses require separate API calls
     // and are not handled by this update operation
 
-    let url = format!("{}/1.3/server/{}", client.base_url, uuid);
-    let resp = client
-        .http
-        .put(&url)
-        .bearer_auth(&client.token)
-        .json(&update_request)
-        .send()?
-        .error_for_status()?;
-
-    let text = resp.text()?;
-    let body: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("failed to parse server update response: {e}"))?;
-
-    // Extract the updated server information
-    let server_info = body
-        .get("server")
-        .and_then(|s| s.as_object())
-        .ok_or_else(|| "unexpected server update response: expected server object")?;
-
-    // Return the updated outputs
     let mut outputs = old_outputs.clone();
 
-    // Update the fields that were changed
-    if let Some(title) = server_info.get("title").and_then(|v| v.as_str()) {
-        outputs["title"] = serde_json::Value::String(title.to_string());
+    // Only send the PUT if there are property changes
+    let server_obj = update_request["server"].as_object().unwrap();
+    if !server_obj.is_empty() {
+        let url = format!("{}/1.3/server/{}", client.base_url, uuid);
+        let resp = client
+            .http
+            .put(&url)
+            .bearer_auth(&client.token)
+            .json(&update_request)
+            .send()?;
+
+        let status = resp.status();
+        let text = resp.text()?;
+
+        if !status.is_success() {
+            return Ok(OperationResult::Failed {
+                error: format!("UpCloud API error {status}: {text}"),
+            });
+        }
+        let body: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| format!("failed to parse server update response: {e}"))?;
+
+        let server_info = body
+            .get("server")
+            .and_then(|s| s.as_object())
+            .ok_or_else(|| "unexpected server update response: expected server object")?;
+
+        if let Some(title) = server_info.get("title").and_then(|v| v.as_str()) {
+            outputs["title"] = serde_json::Value::String(title.to_string());
+        }
+        if let Some(hostname) = server_info.get("hostname").and_then(|v| v.as_str()) {
+            outputs["hostname"] = serde_json::Value::String(hostname.to_string());
+        }
+        if let Some(firewall) = server_info.get("firewall").and_then(|v| v.as_str()) {
+            outputs["firewall"] = serde_json::Value::String(firewall.to_string());
+        }
+        if let Some(metadata) = server_info.get("metadata").and_then(|v| v.as_str()) {
+            outputs["metadata"] = serde_json::Value::String(metadata.to_string());
+        }
+        if let Some(simple_backup) = server_info.get("simple_backup") {
+            outputs["simple_backup"] = simple_backup.clone();
+        }
+        if let Some(timezone) = server_info.get("timezone").and_then(|v| v.as_str()) {
+            outputs["timezone"] = serde_json::Value::String(timezone.to_string());
+        }
+        if let Some(boot_order) = server_info.get("boot_order").and_then(|v| v.as_str()) {
+            outputs["boot_order"] = serde_json::Value::String(boot_order.to_string());
+        }
+        if let Some(nic_model) = server_info.get("nic_model").and_then(|v| v.as_str()) {
+            outputs["nic_model"] = serde_json::Value::String(nic_model.to_string());
+        }
+        if let Some(video_model) = server_info.get("video_model").and_then(|v| v.as_str()) {
+            outputs["video_model"] = serde_json::Value::String(video_model.to_string());
+        }
+        if let Some(state) = server_info.get("state").and_then(|v| v.as_str()) {
+            outputs["state"] = serde_json::Value::String(state.to_string());
+        }
     }
-    if let Some(hostname) = server_info.get("hostname").and_then(|v| v.as_str()) {
-        outputs["hostname"] = serde_json::Value::String(hostname.to_string());
-    }
-    if let Some(firewall) = server_info.get("firewall").and_then(|v| v.as_str()) {
-        outputs["firewall"] = serde_json::Value::String(firewall.to_string());
-    }
-    if let Some(metadata) = server_info.get("metadata").and_then(|v| v.as_str()) {
-        outputs["metadata"] = serde_json::Value::String(metadata.to_string());
-    }
-    if let Some(simple_backup) = server_info.get("simple_backup") {
-        outputs["simple_backup"] = simple_backup.clone();
-    }
-    if let Some(timezone) = server_info.get("timezone").and_then(|v| v.as_str()) {
-        outputs["timezone"] = serde_json::Value::String(timezone.to_string());
-    }
-    if let Some(boot_order) = server_info.get("boot_order").and_then(|v| v.as_str()) {
-        outputs["boot_order"] = serde_json::Value::String(boot_order.to_string());
-    }
-    if let Some(nic_model) = server_info.get("nic_model").and_then(|v| v.as_str()) {
-        outputs["nic_model"] = serde_json::Value::String(nic_model.to_string());
-    }
-    if let Some(video_model) = server_info.get("video_model").and_then(|v| v.as_str()) {
-        outputs["video_model"] = serde_json::Value::String(video_model.to_string());
-    }
-    if let Some(state) = server_info.get("state").and_then(|v| v.as_str()) {
-        outputs["state"] = serde_json::Value::String(state.to_string());
+
+    // Handle state changes via start/stop endpoints
+    let desired_state = new_properties.get("state").and_then(|v| v.as_str());
+    let current_state = old_outputs.get("state").and_then(|v| v.as_str());
+
+    if let Some(desired) = desired_state {
+        let needs_stop = desired == "stopped" && current_state == Some("started");
+        let needs_start = desired == "started" && current_state == Some("stopped");
+
+        if needs_stop {
+            let stop_url = format!("{}/1.3/server/{uuid}/stop", client.base_url);
+            let stop_body = serde_json::json!({
+                "stop_server": {
+                    "stop_type": "soft",
+                    "timeout": "60"
+                }
+            });
+            match client
+                .http
+                .post(&stop_url)
+                .bearer_auth(&client.token)
+                .json(&stop_body)
+                .send()
+            {
+                Ok(resp) if !resp.status().is_success() => {
+                    let text = resp.text().unwrap_or_default();
+                    return Ok(OperationResult::Failed {
+                        error: format!("failed to stop server: {text}"),
+                    });
+                }
+                _ => {}
+            }
+            return poll_state(client, uuid, "stopped", &mut outputs);
+        }
+
+        if needs_start {
+            let start_url = format!("{}/1.3/server/{uuid}/start", client.base_url);
+            match client
+                .http
+                .post(&start_url)
+                .bearer_auth(&client.token)
+                .json(&serde_json::json!({"server": {"start_type": "async"}}))
+                .send()
+            {
+                Ok(resp) if !resp.status().is_success() => {
+                    let text = resp.text().unwrap_or_default();
+                    return Ok(OperationResult::Failed {
+                        error: format!("failed to start server: {text}"),
+                    });
+                }
+                _ => {}
+            }
+            return poll_state(client, uuid, "started", &mut outputs);
+        }
     }
 
     Ok(OperationResult::Complete { outputs })
+}
+
+fn poll_state(
+    client: &Client,
+    uuid: &str,
+    target_state: &str,
+    outputs: &mut serde_json::Value,
+) -> Result<OperationResult, Box<dyn std::error::Error>> {
+    let server_url = format!("{}/1.3/server/{uuid}", client.base_url);
+    let poll_interval = std::time::Duration::from_secs(5);
+    let timeout = std::time::Duration::from_secs(120);
+    let start = std::time::Instant::now();
+
+    loop {
+        std::thread::sleep(poll_interval);
+
+        if start.elapsed() > timeout {
+            return Err(
+                format!("timed out waiting for server {uuid} to reach state '{target_state}'")
+                    .into(),
+            );
+        }
+
+        let resp = client
+            .http
+            .get(&server_url)
+            .bearer_auth(&client.token)
+            .send()?;
+        if !resp.status().is_success() {
+            continue;
+        }
+
+        let body: serde_json::Value = serde_json::from_str(&resp.text()?)?;
+        let server = body.get("server").ok_or("missing 'server' key in response")?;
+        let state = server
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+
+        if state == target_state {
+            outputs["state"] = serde_json::Value::String(state.to_string());
+            return Ok(OperationResult::Complete {
+                outputs: outputs.clone(),
+            });
+        }
+
+        if state == "error" {
+            return Ok(OperationResult::Failed {
+                error: format!("server {uuid} entered error state"),
+            });
+        }
+    }
 }

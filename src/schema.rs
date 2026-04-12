@@ -31,6 +31,7 @@ pub struct FieldDef {
     pub required: bool,
     pub force_new: bool,
     pub requires_stop: bool,
+    pub default: Option<serde_json::Value>,
     pub items: Vec<FieldDef>,
 }
 
@@ -196,6 +197,8 @@ struct RawFieldDef {
     force_new: bool,
     #[serde(default)]
     requires_stop: bool,
+    #[serde(default)]
+    default: Option<toml::Value>,
     #[serde(default)]
     items: Vec<RawFieldDef>,
 }
@@ -546,6 +549,7 @@ fn convert_field(raw: RawFieldDef) -> FieldDef {
         required: raw.required,
         force_new: raw.force_new,
         requires_stop: raw.requires_stop,
+        default: raw.default.map(|v| crate::state::toml_to_json(&v)),
         items: raw.items.into_iter().map(convert_field).collect(),
     }
 }

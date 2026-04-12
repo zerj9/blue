@@ -100,6 +100,11 @@ path = "login_user.ssh_keys"
 type = "array"
 force_new = true
 
+[[fields]]
+path = "state"
+type = "string"
+default = "started"
+
 [[outputs]]
 path = "uuid"
 type = "string"

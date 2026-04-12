@@ -236,13 +236,7 @@ pub fn execute(
                     resource_type,
                     changes,
                 } => {
-                    // Try in-place update first
-                    if let Err(_) =
-                        update_resource(name, resource_type, changes, state, registry, state_path, graph_registry, identities, recipients)
-                    {
-                        // If update fails or is not supported, fall back to delete + create
-                        delete_resource(name, state, registry, state_path)?;
-                    }
+                    update_resource(name, resource_type, changes, state, registry, state_path, graph_registry, identities, recipients)?;
                 }
                 _ => {}
             }
@@ -268,19 +262,8 @@ pub fn execute(
                     let props = &changeset.resource_snapshots[name].properties;
                     create_resource(name, resource_type, props, state, registry, state_path, graph_registry, identities, recipients)?;
                 }
-                state::ResourceChange::Update {
-                    resource_type,
-                    changes: _,
-                    ..
-                } => {
-                    // Skip here - updates are handled in phase 1
-                    // If update failed and fell back to delete, it will be recreated here
-                    if !state.resources.contains_key(name) {
-                        // Resource was deleted in phase 1, now recreate it
-                        let props = &changeset.resource_snapshots[name].properties;
-                        create_resource(name, resource_type, props, state, registry, state_path, graph_registry, identities, recipients)?;
-                    }
-                    // Otherwise, the resource was successfully updated in phase 1
+                state::ResourceChange::Update { .. } => {
+                    // Updates are fully handled in phase 1
                 }
                 _ => {}
             }
