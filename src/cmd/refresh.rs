@@ -50,6 +50,8 @@ pub fn run(args: &RefreshArgs) -> Result<(), Box<dyn std::error::Error>> {
     for (name, snap) in &old_state.resources {
         if snap.status == state::ResourceStatus::Ready
             || snap.status == state::ResourceStatus::Failed
+            || snap.status == state::ResourceStatus::Creating
+            || snap.status == state::ResourceStatus::Updating
         {
             match resolved
                 .registry
