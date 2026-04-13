@@ -84,6 +84,7 @@ required = true
 [[fields]]
 path = "user_data"
 type = "string"
+force_new = true
 
 [[fields]]
 path = "login_user.username"
