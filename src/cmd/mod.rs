@@ -48,6 +48,38 @@ pub(crate) fn resolve_config(
                 .into(),
         );
     }
+    if !config.encryption.recipients.is_empty() {
+        match std::env::var("BLUE_AGE_IDENTITY") {
+            Err(_) => {
+                return Err(
+                    "encryption is configured but BLUE_AGE_IDENTITY is not set. \
+                     Set it to the path of your age private key file."
+                        .into(),
+                );
+            }
+            Ok(id_path) => {
+                let id_contents = std::fs::read_to_string(&id_path)
+                    .map_err(|e| format!("failed to read age identity file '{}': {e}", id_path))?;
+                let public_keys: Vec<&str> = id_contents
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("# public key: "))
+                    .collect();
+                if public_keys.is_empty() {
+                    return Err(format!(
+                        "age identity file '{}' does not contain a public key comment", id_path
+                    ).into());
+                }
+                let matches = public_keys.iter().any(|pk| {
+                    config.encryption.recipients.iter().any(|r| r == pk)
+                });
+                if !matches {
+                    return Err(format!(
+                        "age identity in '{}' does not match any configured recipient", id_path
+                    ).into());
+                }
+            }
+        }
+    }
 
     // Validate hooks
     for (name, source) in &config.data {
