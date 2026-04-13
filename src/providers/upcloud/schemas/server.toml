@@ -102,6 +102,11 @@ type = "array"
 force_new = true
 
 [[fields]]
+path = "firewall"
+type = "string"
+default = "on"
+
+[[fields]]
 path = "state"
 type = "string"
 default = "started"
@@ -124,4 +129,8 @@ type = "string"
 
 [[outputs]]
 path = "plan"
+type = "string"
+
+[[outputs]]
+path = "firewall"
 type = "string"

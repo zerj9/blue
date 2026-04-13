@@ -97,6 +97,10 @@ pub fn create(
         "networking": networking
     });
 
+    if let Some(firewall) = properties.get("firewall").and_then(|v| v.as_str()) {
+        server["firewall"] = serde_json::Value::String(firewall.to_string());
+    }
+
     if let Some(metadata) = properties.get("metadata") {
         let val = match metadata {
             serde_json::Value::Bool(b) => {
