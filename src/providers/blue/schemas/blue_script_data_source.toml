@@ -1,0 +1,6 @@
+[inputs.script]
+type = "string"
+required = true
+
+[inputs.inputs]
+type = "object"

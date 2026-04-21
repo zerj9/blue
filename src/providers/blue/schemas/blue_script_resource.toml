@@ -1,0 +1,8 @@
+[inputs.script]
+type = "string"
+required = true
+force_new = true
+
+[inputs.triggers_replace]
+type = "object"
+force_new = true
