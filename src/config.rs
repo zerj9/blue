@@ -54,7 +54,7 @@ pub struct ResourceDef {
     pub inputs: Option<HashMap<String, Value>>,
 }
 
-// --- Provider config (blue.providers.toml) ---
+// --- Provider config (providers.toml) ---
 
 #[derive(Debug)]
 pub struct ProviderFile {
@@ -167,7 +167,10 @@ triggers_replace = { name = "test" }
         );
         assert_eq!(config.resources.len(), 2);
         assert_eq!(config.resources["web-01"].resource_type, "upcloud.server");
-        assert_eq!(config.resources["web-01"].provider.as_deref(), Some("upcloud-us"));
+        assert_eq!(
+            config.resources["web-01"].provider.as_deref(),
+            Some("upcloud-us")
+        );
         assert!(config.resources["web-01"].inputs.is_some());
         assert_eq!(
             config.resources["random_id"].inputs.as_ref().unwrap()["script"],

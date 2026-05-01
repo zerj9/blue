@@ -13,7 +13,7 @@ blue plan -f config.toml
 | Flag | Description |
 |---|---|
 | `-f, --file` | Path to the resource config file (required) |
-| `--providers` | Path to provider config file (default: `blue.providers.toml`) |
+| `--providers` | Path to provider config file (default: `providers.toml`) |
 | `--state` | Path to state file (default: `blue.state.json`) |
 | `--out` | Save the plan to a file for later deployment |
 | `--var KEY=VALUE` | Override a parameter value (repeatable) |
@@ -56,7 +56,7 @@ blue deploy -f config.toml
 | Flag | Description |
 |---|---|
 | `-f, --file` | Path to the resource config file (runs plan first, then deploys) |
-| `--providers` | Path to provider config file (default: `blue.providers.toml`) |
+| `--providers` | Path to provider config file (default: `providers.toml`) |
 | `--state` | Path to state file (default: `blue.state.json`) |
 | `--var KEY=VALUE` | Override a parameter value (repeatable, only with `-f`) |
 | `--var-file FILE` | Load parameter overrides from a TOML file (only with `-f`) |
@@ -94,7 +94,7 @@ blue refresh --state blue.state.json
 
 | Flag | Description |
 |---|---|
-| `--providers` | Path to provider config file (default: `blue.providers.toml`) |
+| `--providers` | Path to provider config file (default: `providers.toml`) |
 | `--state` | Path to state file (default: `blue.state.json`) |
 
 ### What it does
@@ -123,7 +123,7 @@ blue destroy --state blue.state.json
 
 | Flag | Description |
 |---|---|
-| `--providers` | Path to provider config file (default: `blue.providers.toml`) |
+| `--providers` | Path to provider config file (default: `providers.toml`) |
 | `--state` | Path to state file (default: `blue.state.json`) |
 
 ### What it does

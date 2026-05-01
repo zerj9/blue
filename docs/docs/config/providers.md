@@ -4,7 +4,7 @@ The provider config file defines how Blue connects to cloud providers. It is sep
 
 ## File location
 
-Default: `blue.providers.toml` in the working directory. Override with the `--providers` flag:
+Default: `providers.toml` in the working directory. Override with the `--providers` flag:
 
 ```sh
 blue plan -f config.toml --providers path/to/providers.toml

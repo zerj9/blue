@@ -2,8 +2,8 @@
 
 Blue uses two TOML configuration files:
 
-- **Resource config** — defines your infrastructure: parameters, data sources, resources, and encryption settings. This is the main file you work with.
-- **Provider config** (`blue.providers.toml`) — defines how Blue connects to cloud providers: credentials, account aliases, and authentication. Kept separate so it can be committed safely (no secrets in the file).
+- **Provider config** (`providers.toml`) — defines how Blue connects to cloud providers.
+- **Resource config** — defines your infrastructure: parameters, data sources, resources, and encryption settings.
 
 ## Resource config
 

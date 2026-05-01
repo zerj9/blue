@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Blue
   text: Infrastructure as Code
-  tagline: Define cloud infrastructure in TOML. Plan changes, deploy with confidence.
+  tagline: Define infrastructure in TOML.
   actions:
     - theme: brand
       text: Get Started

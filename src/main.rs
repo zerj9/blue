@@ -30,7 +30,7 @@ enum Command {
     Plan {
         #[arg(short, long)]
         file: String,
-        #[arg(long, default_value = "blue.providers.toml")]
+        #[arg(long, default_value = "providers.toml")]
         providers: String,
         #[arg(long, default_value = "blue.state.json")]
         state: String,
@@ -43,7 +43,7 @@ enum Command {
     Deploy {
         #[arg(short, long)]
         file: String,
-        #[arg(long, default_value = "blue.providers.toml")]
+        #[arg(long, default_value = "providers.toml")]
         providers: String,
         #[arg(long, default_value = "blue.state.json")]
         state: String,
@@ -54,14 +54,14 @@ enum Command {
     },
     /// Update state with live values from providers
     Refresh {
-        #[arg(long, default_value = "blue.providers.toml")]
+        #[arg(long, default_value = "providers.toml")]
         providers: String,
         #[arg(long, default_value = "blue.state.json")]
         state: String,
     },
     /// Delete all managed resources
     Destroy {
-        #[arg(long, default_value = "blue.providers.toml")]
+        #[arg(long, default_value = "providers.toml")]
         providers: String,
         #[arg(long, default_value = "blue.state.json")]
         state: String,
@@ -78,7 +78,13 @@ fn main() {
 
 fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
-        Command::Plan { file, providers, state, var, var_file } => {
+        Command::Plan {
+            file,
+            providers,
+            state,
+            var,
+            var_file,
+        } => {
             let config_dir = config_dir_from_file(&file);
             let providers = build_providers(&providers, config_dir)?;
             let config = load_resource_config(&file)?;
@@ -88,7 +94,13 @@ fn run(cli: Cli) -> Result<(), String> {
             print_plan(&plan);
             Ok(())
         }
-        Command::Deploy { file, providers, state, var, var_file } => {
+        Command::Deploy {
+            file,
+            providers,
+            state,
+            var,
+            var_file,
+        } => {
             let config_dir = config_dir_from_file(&file);
             let providers = build_providers(&providers, config_dir)?;
             let config = load_resource_config(&file)?;
@@ -206,7 +218,11 @@ fn print_plan(plan: &plan::Plan) {
             types::Action::Delete => "-",
             types::Action::Unchanged => " ",
         };
-        println!("  {symbol} {name} ({type_})", name = step.name, type_ = step.resource_type);
+        println!(
+            "  {symbol} {name} ({type_})",
+            name = step.name,
+            type_ = step.resource_type
+        );
     }
     println!();
 }
