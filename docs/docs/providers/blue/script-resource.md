@@ -10,6 +10,7 @@ Runs a user-defined script as its create operation. State-tracked with standard 
 type = "blue.script"
 script = "scripts/generate_id.js"
 triggers_replace = { server_name = "{{ resources.web-01.hostname }}" }
+inputs = { region = "{{ parameters.region }}" }
 ```
 :::
 
@@ -18,7 +19,8 @@ triggers_replace = { server_name = "{{ resources.web-01.hostname }}" }
 | Field | Type | Required | force_new | Description |
 |---|---|---|---|---|
 | `script` | string | yes | yes | Path to the script file, relative to the config file |
-| `triggers_replace` | object | no | yes | Key-value pairs that trigger replacement when changed |
+| `triggers_replace` | object | no | yes | Key-value pairs that trigger replacement when changed. **Not** passed to the script body. |
+| `inputs` | object | no | yes | Key-value pairs passed to the script body as the `inputs` variable. Changes trigger replacement (script re-runs). |
 
 The script file hash is also tracked — modifying the script file content triggers replacement even if the path stays the same.
 

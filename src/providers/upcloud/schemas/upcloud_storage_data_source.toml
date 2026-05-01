@@ -1,0 +1,18 @@
+[inputs.filters]
+type = "object"
+required = true
+
+[outputs.uuid]
+type = "string"
+
+[outputs.title]
+type = "string"
+
+[outputs.size]
+type = "number"
+
+[outputs.zone]
+type = "string"
+
+[outputs.type]
+type = "string"

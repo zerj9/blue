@@ -6,3 +6,7 @@ force_new = true
 [inputs.triggers_replace]
 type = "object"
 force_new = true
+
+[inputs.inputs]
+type = "object"
+force_new = true

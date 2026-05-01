@@ -63,7 +63,7 @@ fn execute_script(
     let mut runtime = JsRuntime::new(RuntimeOptions::default());
 
     let full_script = format!(
-        "const __log_prefix__ = '{log_prefix}';\n{CONSOLE_JS}\nconst context = {context_json};\n(function() {{\n{script}\n}})()"
+        "const __log_prefix__ = '{log_prefix}';\n{CONSOLE_JS}\nconst context = {context_json};\n(function(inputs) {{\n{script}\n}})(context.inputs)"
     );
 
     let global = runtime

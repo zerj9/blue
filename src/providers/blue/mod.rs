@@ -78,10 +78,7 @@ impl ResourceType for ScriptResource {
 
         let script_path = self.resolve_script_path(script)?;
 
-        // Build context: inputs minus script and triggers_replace
-        let mut script_inputs = inputs.as_object().cloned().unwrap_or_default();
-        script_inputs.remove("script");
-        script_inputs.remove("triggers_replace");
+        let script_inputs = inputs.get("inputs").cloned().unwrap_or_else(|| json!({}));
 
         let context = json!({
             "operation": "create",
@@ -212,9 +209,7 @@ impl DataSourceType for ScriptDataSource {
 
         let script_path = self.resolve_script_path(script)?;
 
-        // Build context: inputs minus script
-        let mut script_inputs = inputs.as_object().cloned().unwrap_or_default();
-        script_inputs.remove("script");
+        let script_inputs = inputs.get("inputs").cloned().unwrap_or_else(|| json!({}));
 
         let context = json!({
             "inputs": script_inputs
