@@ -18,3 +18,10 @@ node_modules
 
 # VitePress build artifacts
 docs/.vitepress/cache
+docs/.vitepress/dist
+docs/.vitepress/config.mts.timestamp-*.mjs
+
+# Auto-generated provider pages (built by docs/scripts/gen-docs.mjs from
+# schema TOMLs + sibling .md files). Hand-written index.md files are kept.
+docs/providers/*/*.md
+!docs/providers/*/index.md

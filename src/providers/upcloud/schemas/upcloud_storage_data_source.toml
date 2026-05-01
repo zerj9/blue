@@ -1,18 +1,26 @@
+section = "Storage"
+
 [inputs.filters]
 type = "object"
 required = true
+description = "Key-value pairs filtered against fields of each storage entry. All filters must match."
 
 [outputs.uuid]
 type = "string"
+description = "Unique identifier of the matched storage."
 
 [outputs.title]
 type = "string"
+description = "Human-readable title."
 
 [outputs.size]
 type = "number"
+description = "Storage size in GB."
 
 [outputs.zone]
 type = "string"
+description = "UpCloud zone identifier (e.g. uk-lon1). Not present on public templates."
 
 [outputs.type]
 type = "string"
+description = "Storage class: normal, backup, cdrom, or template."

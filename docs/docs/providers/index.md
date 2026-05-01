@@ -7,3 +7,4 @@ See [Provider configuration](../config/providers.md) for how to configure provid
 ## Available Providers
 
 - [Blue](./blue/) — Built-in provider with script resources and data sources
+- [UpCloud](./upcloud/) — Cloud infrastructure (servers, storage, networking) at upcloud.com
