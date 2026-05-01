@@ -52,7 +52,7 @@ user_data = "#!/bin/bash\necho '{{ parameters.github_token }}'"
 
 ## Provider config
 
-See [Providers](./providers.md) for the full reference.
+See [Provider configuration](./providers.md) for the full reference.
 
 ## Sections
 
@@ -61,4 +61,4 @@ See [Providers](./providers.md) for the full reference.
 - [Resources](./resources.md)
 - [Templates](./templates.md)
 - [Encryption](./encryption.md)
-- [Providers](./providers.md)
+- [Provider configuration](./providers.md)

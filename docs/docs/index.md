@@ -20,4 +20,5 @@ features:
     details: Preview changes before applying them. Deploy executes the plan — no surprises.
   - title: Provider-based
     details: Extensible provider system with multiple account support. Each provider handles its own resource types.
+    link: /providers/
 ---

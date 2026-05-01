@@ -1,6 +1,8 @@
-# Providers
+# Provider configuration
 
 The provider config file defines how Blue connects to cloud providers. It is separate from the resource config — kept in its own file so it can be committed safely without exposing secrets.
+
+This page covers the mechanics common to every provider (instance naming, multi-instance config, validation). For the actual fields each provider accepts, see its page in the [providers catalog](/providers/).
 
 ## File location
 
@@ -12,7 +14,15 @@ blue plan -f config.toml --providers path/to/providers.toml
 
 ## Format
 
-Each top-level table (except `[data.*]`) defines a provider instance:
+Each top-level table (except `[data.*]`) defines a provider instance. The table key is the instance name, and the `type` field selects the provider:
+
+```toml
+[<instance-name>]
+type = "<provider-type>"
+# additional fields are provider-specific
+```
+
+For example, an UpCloud instance with credentials read from environment variables:
 
 ```toml
 [upcloud]
@@ -26,9 +36,8 @@ password_env = "UPCLOUD_PASSWORD"
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | yes | The provider type (e.g. `"upcloud"`) |
-| Other fields | | | Provider-specific — see the provider documentation |
 
-Credentials can be supplied via environment variable references (`*_env` fields) or template references to script data sources.
+Beyond `type`, every provider defines its own fields — see the [providers catalog](/providers/) for each provider's exact field list. Credentials can be supplied via environment variable references (`*_env` fields) or template references to script data sources.
 
 ## Multiple instances
 

@@ -10,7 +10,7 @@ const guideSidebar = [
       { text: 'Resources', link: '/config/resources' },
       { text: 'Templates', link: '/config/templates' },
       { text: 'Encryption', link: '/config/encryption' },
-      { text: 'Providers', link: '/config/providers' },
+      { text: 'Provider config', link: '/config/providers' },
       { text: 'State', link: '/config/state' },
     ]
   },
