@@ -34,7 +34,8 @@ Secrets can be interpolated into other fields using templates:
 secret = true
 env = "GITHUB_TOKEN"
 
-[resources.web-01.inputs]
+[resources.web-01]
+type = "upcloud.server"
 user_data = "#!/bin/bash\necho '{{ parameters.github_token }}'"
 ```
 :::

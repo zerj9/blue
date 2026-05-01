@@ -40,8 +40,6 @@ filters = { type = "template", title = "Ubuntu Server 24.04 LTS" }
 
 [resources.web-01]
 type = "upcloud.server"
-
-[resources.web-01.inputs]
 hostname = "web-01"
 zone = "uk-lon1"
 plan = "DEV-1xCPU-1GB"

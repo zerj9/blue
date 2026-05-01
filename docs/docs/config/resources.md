@@ -11,8 +11,6 @@ A provider resource manages infrastructure through a cloud API:
 [resources.web-01]
 type = "upcloud.server"
 provider = "upcloud-us"          # optional, defaults to provider from type
-
-[resources.web-01.inputs]
 hostname = "web-01"
 zone = "uk-lon1"
 plan = "DEV-1xCPU-1GB"
@@ -22,11 +20,13 @@ storage = "{{ data.ubuntu.uuid }}"
 
 ### Fields
 
+`type` and `provider` are reserved keys read by Blue. Every other key is a resource input — its valid set, types, and required-ness depend on the resource type. See the provider's documentation for each resource type's input list.
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | yes | Provider and resource type in `provider.type` format |
 | `provider` | string | no | Provider instance name. Defaults to the prefix of `type` |
-| `inputs` | table | yes | Resource inputs. Fields depend on the resource type — see the provider documentation |
+| _other keys_ | varies | varies | Resource inputs — see the provider documentation |
 
 ## Script resource
 
@@ -36,8 +36,6 @@ A script resource runs a user-defined script as its create operation. It behaves
 ```toml
 [resources.random_id]
 type = "blue.script"
-
-[resources.random_id.inputs]
 script = "scripts/generate_id.js"
 triggers_replace = { server_name = "{{ resources.web-01.hostname }}" }
 ```
@@ -48,7 +46,8 @@ triggers_replace = { server_name = "{{ resources.web-01.hostname }}" }
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | yes | Must be `"blue.script"` |
-| `inputs` | table | yes | Inputs for the script resource (must include `script`) |
+| `script` | string | yes | Path to the script file, relative to the config file |
+| `triggers_replace` | table | no | Key-value pairs that trigger replacement when changed |
 
 ### Lifecycle
 
@@ -75,7 +74,8 @@ Use <code v-pre>{{ resources.name.path }}</code> to reference a resource's outpu
 
 ::: v-pre
 ```toml
-[resources.web-01-firewall.inputs]
+[resources.web-01-firewall]
+type = "upcloud.firewall"
 server_uuid = "{{ resources.web-01.uuid }}"
 ```
 :::

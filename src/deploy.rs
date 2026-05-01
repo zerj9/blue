@@ -245,8 +245,6 @@ mod tests {
         let config = parse_resource_config(r#"
 [resources.test]
 type = "blue.script"
-
-[resources.test.inputs]
 script = "test.js"
 triggers_replace = { key = "value" }
 "#).unwrap();
@@ -287,8 +285,6 @@ triggers_replace = { key = "value" }
         let config = parse_resource_config(r#"
 [resources.test]
 type = "blue.script"
-
-[resources.test.inputs]
 script = "new.js"
 triggers_replace = { key = "value" }
 "#).unwrap();

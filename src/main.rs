@@ -149,13 +149,50 @@ fn config_dir_from_file(file: &str) -> Option<std::path::PathBuf> {
 }
 
 fn build_providers(
-    _providers_path: &str,
+    providers_path: &str,
     config_dir: Option<std::path::PathBuf>,
 ) -> Result<provider::Providers, String> {
     let mut providers = provider::Providers::new();
     providers::blue::register(&mut providers, config_dir);
-    // TODO: parse providers config, register external providers
+
+    let provider_file = match std::fs::read_to_string(providers_path) {
+        Ok(s) => Some(config::parse_provider_config(&s)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            return Err(format!(
+                "Failed to read provider config '{providers_path}': {e}"
+            ));
+        }
+    };
+
+    if let Some(file) = provider_file {
+        // TODO: resolve [data.*] script data sources before instantiating providers
+        for (name, def) in &file.providers {
+            register_configured(&mut providers, name, def)?;
+        }
+    }
+
     Ok(providers)
+}
+
+/// Construct and register a provider instance from a `[name]` block in `providers.toml`.
+///
+/// `instance_name` is the user-chosen TOML key (e.g. `"upcloud"`, `"upcloud-us"`).
+/// `def` carries the `type` field and the provider-specific config (credentials etc.).
+///
+/// Each provider's `register` function takes this same `(providers, instance_name, def)`
+/// signature; new providers are added as match arms here.
+fn register_configured(
+    providers: &mut provider::Providers,
+    instance_name: &str,
+    def: &config::ProviderDef,
+) -> Result<(), String> {
+    match def.provider_type.as_str() {
+        "upcloud" => providers::upcloud::register(providers, instance_name, def),
+        other => Err(format!(
+            "Unknown provider type '{other}' for instance '{instance_name}'"
+        )),
+    }
 }
 
 fn load_resource_config(path: &str) -> Result<config::ResourceConfig, String> {
@@ -225,4 +262,48 @@ fn print_plan(plan: &plan::Plan) {
         );
     }
     println!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn build_providers_missing_file_is_non_fatal() {
+        let path = std::env::temp_dir().join(format!("blue-no-such-{}.toml", Uuid::new_v4()));
+        assert!(!path.exists());
+
+        let providers = build_providers(path.to_str().unwrap(), None)
+            .expect("missing providers.toml should not be an error");
+
+        assert!(
+            providers.resource_type("blue.script").is_some(),
+            "blue provider should still be registered when providers.toml is missing"
+        );
+    }
+
+    #[test]
+    fn build_providers_unknown_type_errors_with_instance_name() {
+        let path = std::env::temp_dir().join(format!("blue-unknown-{}.toml", Uuid::new_v4()));
+        std::fs::write(
+            &path,
+            r#"
+[my-instance]
+type = "nonexistent"
+"#,
+        )
+        .unwrap();
+
+        let result = build_providers(path.to_str().unwrap(), None);
+        let _ = std::fs::remove_file(&path);
+
+        match result {
+            Ok(_) => panic!("unknown provider type should fail"),
+            Err(e) => assert!(
+                e.contains("my-instance") && e.contains("nonexistent"),
+                "error should name both instance and type, got: {e}"
+            ),
+        }
+    }
 }

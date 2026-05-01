@@ -40,7 +40,8 @@ The returned object becomes the data source's outputs, accessible via templates:
 
 ::: v-pre
 ```toml
-[resources.web-01.inputs]
+[resources.web-01]
+type = "upcloud.server"
 password = "{{ data.vault_creds.password }}"
 ```
 :::

@@ -8,8 +8,6 @@ Runs a user-defined script as its create operation. State-tracked with standard 
 ```toml
 [resources.random_id]
 type = "blue.script"
-
-[resources.random_id.inputs]
 script = "scripts/generate_id.js"
 triggers_replace = { server_name = "{{ resources.web-01.hostname }}" }
 ```

@@ -70,7 +70,8 @@ Use <code v-pre>{{ parameters.name }}</code> in resource inputs and data source 
 description = "OS disk size in GB"
 default = 10
 
-[resources.web-01.inputs]
+[resources.web-01]
+type = "upcloud.server"
 size = "{{ parameters.disk_size }}"
 ```
 :::

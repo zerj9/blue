@@ -53,10 +53,8 @@ impl Graph {
         // Add edges from {{ }} refs in resource inputs
         for (name, res) in &config.resources {
             let node_key = format!("resources.{name}");
-            if let Some(inputs) = &res.inputs {
-                for v in inputs.values() {
-                    graph.add_edges_from_value(&node_key, v)?;
-                }
+            for v in res.config.values() {
+                graph.add_edges_from_value(&node_key, v)?;
             }
         }
 
@@ -228,8 +226,6 @@ filters = { title = "Ubuntu Server 24.04 LTS" }
 
 [resources.web-01]
 type = "upcloud.server"
-
-[resources.web-01.inputs]
 zone = "{{ parameters.region }}"
 storage = "{{ data.ubuntu.uuid }}"
 "#).unwrap();
@@ -250,8 +246,6 @@ storage = "{{ data.ubuntu.uuid }}"
         let config = parse_resource_config(r#"
 [resources.web-01]
 type = "upcloud.server"
-
-[resources.web-01.inputs]
 hostname = "web-01"
 "#).unwrap();
 
@@ -273,8 +267,6 @@ hostname = "web-01"
         let config = parse_resource_config(r#"
 [resources.web-01]
 type = "upcloud.server"
-
-[resources.web-01.inputs]
 hostname = "web-01"
 
 [data.lookup]
@@ -292,14 +284,10 @@ filters = { uuid = "{{ resources.web-01.uuid }}" }
         let config = parse_resource_config(r#"
 [resources.a]
 type = "upcloud.server"
-
-[resources.a.inputs]
 dep = "{{ resources.b.uuid }}"
 
 [resources.b]
 type = "upcloud.server"
-
-[resources.b.inputs]
 dep = "{{ resources.a.uuid }}"
 "#).unwrap();
 
@@ -359,8 +347,6 @@ dep = "{{ resources.a.uuid }}"
         let config = parse_resource_config(r#"
 [resources.web-01]
 type = "upcloud.server"
-
-[resources.web-01.inputs]
 storage = "{{ data.nonexistent.uuid }}"
 "#).unwrap();
 

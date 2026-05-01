@@ -12,3 +12,5 @@ petgraph = "0.8"
 clap = { version = "4", features = ["derive"] }
 deno_core = "0.398.0"
 tokio = { version = "1", features = ["rt", "time"] }
+ureq = { version = "3", features = ["json"] }
+base64 = "0.22"

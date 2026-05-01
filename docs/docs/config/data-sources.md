@@ -68,7 +68,8 @@ Use <code v-pre>{{ data.name.path }}</code> in resource inputs:
 type = "upcloud.storage"
 filters = { type = "template", title = "Ubuntu Server 24.04 LTS" }
 
-[resources.web-01.inputs]
+[resources.web-01]
+type = "upcloud.server"
 storage = "{{ data.ubuntu.uuid }}"
 ```
 :::

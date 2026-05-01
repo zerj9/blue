@@ -50,8 +50,8 @@ pub struct ResourceDef {
     pub resource_type: String,
     #[serde(default)]
     pub provider: Option<String>,
-    #[serde(default)]
-    pub inputs: Option<HashMap<String, Value>>,
+    #[serde(flatten)]
+    pub config: HashMap<String, Value>,
 }
 
 // --- Provider config (providers.toml) ---
@@ -136,16 +136,12 @@ inputs = { path = "secret/upcloud" }
 [resources.web-01]
 type = "upcloud.server"
 provider = "upcloud-us"
-
-[resources.web-01.inputs]
 hostname = "web-01"
 zone = "uk-lon1"
 storage = "{{ data.ubuntu.uuid }}"
 
 [resources.random_id]
 type = "blue.script"
-
-[resources.random_id.inputs]
 script = "scripts/generate_id.js"
 triggers_replace = { name = "test" }
 "#;
@@ -171,9 +167,12 @@ triggers_replace = { name = "test" }
             config.resources["web-01"].provider.as_deref(),
             Some("upcloud-us")
         );
-        assert!(config.resources["web-01"].inputs.is_some());
         assert_eq!(
-            config.resources["random_id"].inputs.as_ref().unwrap()["script"],
+            config.resources["web-01"].config["hostname"],
+            Value::String("web-01".into())
+        );
+        assert_eq!(
+            config.resources["random_id"].config["script"],
             Value::String("scripts/generate_id.js".into())
         );
     }

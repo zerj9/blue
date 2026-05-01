@@ -22,6 +22,7 @@ pub struct FieldDef {
     pub requires_stop: bool,
     pub default: Option<Value>,
     pub items: Vec<FieldDef>,
+    pub fields: Vec<FieldDef>,
     pub ordered: bool,
 }
 

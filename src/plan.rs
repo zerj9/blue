@@ -52,6 +52,8 @@ pub fn create_plan(
             let ds_type = providers
                 .data_source_type(&ds_config.data_type)
                 .ok_or_else(|| format!("Unknown data source type: {}", ds_config.data_type))?;
+            crate::schema::validate_inputs(&ds_type.schema().inputs, &resolved_config)
+                .map_err(|e| format!("data source '{name}': {e}"))?;
             let outputs = ds_type.read(resolved_config)?;
             output_map.insert(node.to_string(), outputs);
         } else if let Some(name) = node.strip_prefix("resources.") {
@@ -67,14 +69,13 @@ pub fn create_plan(
                     .ok_or_else(|| format!("Unknown resource type: {}", res_def.resource_type))?;
                 let schema = res_type.schema();
 
-                let resolved = match &res_def.inputs {
-                    Some(inputs) => resolve_value(
-                        &Value::Object(inputs.clone().into_iter().collect()),
-                        &output_map,
-                    )?,
-                    None => Value::Object(serde_json::Map::new()),
-                };
+                let resolved = resolve_value(
+                    &Value::Object(res_def.config.clone().into_iter().collect()),
+                    &output_map,
+                )?;
 
+                crate::schema::validate_inputs(&schema.inputs, &resolved)
+                    .map_err(|e| format!("resource '{name}': {e}"))?;
                 res_type.validate(&resolved)?;
 
                 let old_inputs = state.resources.get(name).map(|r| &r.inputs);
@@ -196,9 +197,9 @@ fn cascade_replacements(
                 continue;
             }
 
-            let Some(inputs) = &res_def.inputs else {
+            if res_def.config.is_empty() {
                 continue;
-            };
+            }
 
             let schema = providers
                 .resource_type(&res_def.resource_type)
@@ -206,7 +207,7 @@ fn cascade_replacements(
                 .schema();
 
             let mut needs_replace = false;
-            for (field_name, value) in inputs {
+            for (field_name, value) in &res_def.config {
                 let is_force_new = schema.inputs.iter().any(|f| f.path == *field_name && f.force_new);
                 if is_force_new && refs_to_replaced(value, &replaced)? {
                     needs_replace = true;
@@ -277,8 +278,6 @@ mod tests {
         let config = parse_resource_config(r#"
 [resources.test]
 type = "blue.script"
-
-[resources.test.inputs]
 script = "test.js"
 triggers_replace = { key = "value" }
 "#).unwrap();
@@ -317,8 +316,6 @@ triggers_replace = { key = "value" }
         let config = parse_resource_config(r#"
 [resources.test]
 type = "blue.script"
-
-[resources.test.inputs]
 script = "test.js"
 triggers_replace = { key = "value" }
 "#).unwrap();
@@ -342,8 +339,6 @@ triggers_replace = { key = "value" }
         let config = parse_resource_config(r#"
 [resources.test]
 type = "blue.script"
-
-[resources.test.inputs]
 script = "new_script.js"
 triggers_replace = { key = "value" }
 "#).unwrap();
@@ -371,8 +366,6 @@ default = "test-server"
 
 [resources.test]
 type = "blue.script"
-
-[resources.test.inputs]
 script = "test.js"
 triggers_replace = { name = "{{ parameters.name }}" }
 "#).unwrap();
