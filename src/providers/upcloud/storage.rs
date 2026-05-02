@@ -26,6 +26,11 @@ struct StorageListInner {
     storage: Vec<Value>,
 }
 
+#[derive(Deserialize)]
+struct StorageDetailResponse {
+    storage: Value,
+}
+
 impl UpCloudStorageDataSource {
     pub fn new(client: Arc<UpCloudClient>) -> Self {
         let schema = crate::schema::parse_schema(SCHEMA)
@@ -34,8 +39,43 @@ impl UpCloudStorageDataSource {
     }
 
     fn list_storage(&self) -> Result<Vec<Value>, String> {
-        let resp: StorageListResponse = self.client.get("/storage")?;
-        Ok(resp.storages.storage)
+        let path = "/storage";
+        let mut resp = self.client.get(path)?;
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
+            return Err(format!(
+                "upcloud GET {path} failed: http status: {status}: {body}"
+            ));
+        }
+        let wrapper: StorageListResponse = resp
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("upcloud GET {path} response parse failed: {e}"))?;
+        Ok(wrapper.storages.storage)
+    }
+
+    /// Fetch a single storage by UUID. Returns Ok(None) if the storage doesn't
+    /// exist (404), letting the caller translate that to a friendlier "no match"
+    /// error consistent with the list-based path.
+    fn get_storage(&self, uuid: &str) -> Result<Option<Value>, String> {
+        let path = format!("/storage/{uuid}");
+        let mut resp = self.client.get(&path)?;
+        let status = resp.status().as_u16();
+        if status == 404 {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
+            return Err(format!(
+                "upcloud GET {path} failed: http status: {status}: {body}"
+            ));
+        }
+        let wrapper: StorageDetailResponse = resp
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("upcloud GET {path} response parse failed: {e}"))?;
+        Ok(Some(wrapper.storage))
     }
 }
 
@@ -50,6 +90,36 @@ impl DataSourceType for UpCloudStorageDataSource {
             .and_then(|v| v.as_object())
             .ok_or_else(|| "missing required input 'filters'".to_string())?;
 
+        // Fast path: when uuid is in the filter, fetch by uuid directly
+        // instead of pulling the full storage list. Other filter keys (if
+        // any) are then verified against the returned storage.
+        if let Some(uuid) = filters.get("uuid").and_then(|v| v.as_str()) {
+            let storage = self
+                .get_storage(uuid)?
+                .ok_or_else(|| {
+                    format!(
+                        "no upcloud storage matched filters {}",
+                        filters_to_string(filters)
+                    )
+                })?;
+
+            let extras: Map<String, Value> = filters
+                .iter()
+                .filter(|(k, _)| k.as_str() != "uuid")
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+
+            if !extras.is_empty() && !storage_matches(&storage, &extras) {
+                return Err(format!(
+                    "upcloud storage with uuid '{uuid}' does not match other filters {}",
+                    filters_to_string(&extras)
+                ));
+            }
+
+            return Ok(extract_outputs(&storage));
+        }
+
+        // Slow path: list all storages and filter client-side.
         let storages = self.list_storage()?;
         let matched = find_match(&storages, filters)?;
         Ok(extract_outputs(matched))
