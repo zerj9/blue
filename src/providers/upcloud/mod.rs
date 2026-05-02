@@ -1,5 +1,5 @@
 pub mod client;
-pub mod storage;
+pub mod storage_data_source;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use crate::config::ProviderDef;
 use crate::provider::{DataSourceType, ProviderInstance, Providers, ResourceType};
 
 use client::UpCloudClient;
-use storage::UpCloudStorageDataSource;
+use storage_data_source::UpCloudStorageDataSource;
 
 pub struct UpCloudProvider {
     storage_data_source: UpCloudStorageDataSource,
