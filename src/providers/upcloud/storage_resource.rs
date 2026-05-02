@@ -260,10 +260,15 @@ fn build_create_body(inputs: &Value) -> Value {
 /// Same number-as-string quirk as `build_create_body` for `size` and
 /// `backup_rule.retention`.
 ///
-/// Limitation: removing `backup_rule` or `labels` from config doesn't clear
-/// them from UpCloud — if absent in inputs, the field is omitted from the
-/// PUT body and UpCloud leaves the previous value. To clear, deploy with an
-/// explicit empty value (not yet supported in phase 1).
+/// `backup_rule` is always included in the body: populated when the user has
+/// one in their config, empty (`{}`) when they don't. UpCloud accepts an
+/// empty block as "clear the rule." This means removing the
+/// `[resources.X.backup_rule]` block from config produces a deploy that
+/// actually clears the rule on UpCloud, rather than leaving it untouched.
+///
+/// `labels` does NOT yet have the same behavior — if absent from config, it
+/// stays out of the PUT body and UpCloud preserves the previous labels. Same
+/// pattern could be applied; not done in phase 1.
 fn build_modify_body(inputs: &Value) -> Value {
     let mut storage = Map::new();
 
@@ -274,8 +279,10 @@ fn build_modify_body(inputs: &Value) -> Value {
         storage.insert("size".to_string(), to_string_value(v));
     }
 
+    // Always include backup_rule. Populated rule sets the schedule; empty
+    // object clears it.
+    let mut rule = Map::new();
     if let Some(br) = inputs.get("backup_rule").and_then(|v| v.as_object()) {
-        let mut rule = Map::new();
         if let Some(v) = br.get("interval") {
             rule.insert("interval".to_string(), v.clone());
         }
@@ -285,10 +292,8 @@ fn build_modify_body(inputs: &Value) -> Value {
         if let Some(v) = br.get("retention") {
             rule.insert("retention".to_string(), to_string_value(v));
         }
-        if !rule.is_empty() {
-            storage.insert("backup_rule".to_string(), Value::Object(rule));
-        }
     }
+    storage.insert("backup_rule".to_string(), Value::Object(rule));
 
     if let Some(labels) = inputs.get("labels").and_then(|v| v.as_array()) {
         if !labels.is_empty() {
@@ -482,15 +487,20 @@ mod tests {
     }
 
     #[test]
-    fn build_modify_body_omits_absent_optional_fields() {
+    fn build_modify_body_clears_backup_rule_when_absent_from_inputs() {
+        // User had a backup_rule before, removed it from config. Modify body
+        // should explicitly send an empty rule so UpCloud clears the schedule
+        // (rather than preserving it as it would for omitted fields).
         let inputs = json!({
             "title": "renamed",
             "size": 100,
         });
         let body = build_modify_body(&inputs);
         let storage = body.get("storage").unwrap().as_object().unwrap();
-        assert_eq!(storage.len(), 2); // title + size only
-        assert!(!storage.contains_key("backup_rule"));
+        assert!(storage.contains_key("backup_rule"));
+        let rule = storage.get("backup_rule").unwrap().as_object().unwrap();
+        assert!(rule.is_empty(), "backup_rule should be empty object to clear, got {:?}", rule);
+        // Labels still uses the omit-if-absent pattern (known limitation).
         assert!(!storage.contains_key("labels"));
     }
 }

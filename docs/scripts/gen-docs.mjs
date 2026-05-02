@@ -46,6 +46,47 @@ function renderInputsTable(inputs) {
     const desc = (def.description ?? '').replace(/\|/g, '\\|')
     rows.push(`| \`${name}\` | ${def.type} | ${required} | ${forceNew} | ${desc} |`)
   }
+
+  // Sub-tables for nested object fields and array object-items.
+  const subTables = []
+  for (const [name, def] of Object.entries(inputs)) {
+    if (def.fields && Object.keys(def.fields).length > 0) {
+      subTables.push(renderNestedFieldsTable(`\`${name}\``, def.fields))
+    }
+    // Distinguish primitive array items (`items = { type = "string" }`) from
+    // object array items (`items.X = { ... }`). The primitive form has a
+    // top-level `type` key; the object form's keys are field definitions.
+    if (
+      def.items &&
+      typeof def.items === 'object' &&
+      def.items.type === undefined &&
+      Object.keys(def.items).length > 0
+    ) {
+      subTables.push(renderNestedFieldsTable(`\`${name}\``, def.items))
+    }
+  }
+
+  if (subTables.length === 0) {
+    return rows.join('\n')
+  }
+  return rows.join('\n') + '\n\n' + subTables.join('\n\n')
+}
+
+/// Render a table for nested fields (children of an object field, or fields
+/// of array items). Drops the `Force New` column since force_new applies at
+/// the parent level, not at nested fields.
+function renderNestedFieldsTable(title, fields) {
+  const rows = [
+    `**${title}:**`,
+    '',
+    '| Field | Type | Required | Description |',
+    '|---|---|---|---|',
+  ]
+  for (const [name, def] of Object.entries(fields)) {
+    const required = def.required ? 'yes' : '—'
+    const desc = (def.description ?? '').replace(/\|/g, '\\|')
+    rows.push(`| \`${name}\` | ${def.type} | ${required} | ${desc} |`)
+  }
   return rows.join('\n')
 }
 
