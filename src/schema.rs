@@ -133,7 +133,37 @@ pub fn parse_schema(toml_str: &str) -> Result<Schema, String> {
     })
 }
 
-// --- Validation ---
+// --- Defaults and validation ---
+
+/// Apply schema defaults to a resolved input value.
+///
+/// For each top-level field in `schema`:
+/// - If the field is missing from `value` and has a `default`, the default
+///   is inserted.
+/// - If the field is present and is an object with declared `fields`,
+///   recurse into the child schema so nested defaults can fill in.
+///
+/// Arrays are not recursed into — each user-supplied element is treated as
+/// the user's complete object. This function is idempotent.
+pub fn apply_defaults(schema: &[FieldDef], value: JsonValue) -> JsonValue {
+    let mut obj = value.as_object().cloned().unwrap_or_default();
+    for field in schema {
+        match obj.get(&field.path) {
+            None => {
+                if let Some(default) = &field.default {
+                    obj.insert(field.path.clone(), default.clone());
+                }
+            }
+            Some(existing) => {
+                if matches!(field.field_type, FieldType::Object) && !field.fields.is_empty() {
+                    let recursed = apply_defaults(&field.fields, existing.clone());
+                    obj.insert(field.path.clone(), recursed);
+                }
+            }
+        }
+    }
+    JsonValue::Object(obj)
+}
 
 /// Validate a resolved input value against an input schema.
 ///
@@ -612,5 +642,132 @@ type = "array"
 "#,
         );
         validate_inputs(&inputs, &json!({"anything": [1, "two", {"three": true}]})).unwrap();
+    }
+
+    // --- Defaults tests ---
+
+    #[test]
+    fn apply_defaults_fills_missing_top_level_field() {
+        let inputs = schema_for(
+            r#"
+[inputs.tier]
+type = "string"
+default = "hdd"
+
+[inputs.title]
+type = "string"
+required = true
+"#,
+        );
+        let result = apply_defaults(&inputs, json!({"title": "data-disk"}));
+        assert_eq!(result["title"], "data-disk");
+        assert_eq!(result["tier"], "hdd");
+    }
+
+    #[test]
+    fn apply_defaults_does_not_overwrite_existing_value() {
+        let inputs = schema_for(
+            r#"
+[inputs.tier]
+type = "string"
+default = "hdd"
+"#,
+        );
+        let result = apply_defaults(&inputs, json!({"tier": "maxiops"}));
+        assert_eq!(result["tier"], "maxiops");
+    }
+
+    #[test]
+    fn apply_defaults_is_idempotent() {
+        let inputs = schema_for(
+            r#"
+[inputs.tier]
+type = "string"
+default = "hdd"
+"#,
+        );
+        let once = apply_defaults(&inputs, json!({}));
+        let twice = apply_defaults(&inputs, once.clone());
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn apply_defaults_recurses_into_present_objects() {
+        let inputs = schema_for(
+            r#"
+[inputs.backup_rule]
+type = "object"
+
+[inputs.backup_rule.fields.interval]
+type = "string"
+
+[inputs.backup_rule.fields.retention]
+type = "number"
+default = 30
+"#,
+        );
+        // Parent present, retention missing — default fills in
+        let result = apply_defaults(
+            &inputs,
+            json!({"backup_rule": {"interval": "daily"}}),
+        );
+        assert_eq!(result["backup_rule"]["interval"], "daily");
+        assert_eq!(result["backup_rule"]["retention"], 30);
+    }
+
+    #[test]
+    fn apply_defaults_does_not_synthesize_missing_object_parent() {
+        let inputs = schema_for(
+            r#"
+[inputs.backup_rule]
+type = "object"
+
+[inputs.backup_rule.fields.retention]
+type = "number"
+default = 30
+"#,
+        );
+        // Parent absent and has no default — don't materialize empty object
+        let result = apply_defaults(&inputs, json!({}));
+        assert!(result.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_defaults_skips_array_items() {
+        let inputs = schema_for(
+            r#"
+[inputs.rules]
+type = "array"
+
+[inputs.rules.items.direction]
+type = "string"
+
+[inputs.rules.items.priority]
+type = "number"
+default = 100
+"#,
+        );
+        // Array elements aren't recursed into
+        let input = json!({"rules": [{"direction": "in"}]});
+        let result = apply_defaults(&inputs, input.clone());
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn apply_defaults_with_empty_input_fills_all_defaults() {
+        let inputs = schema_for(
+            r#"
+[inputs.tier]
+type = "string"
+default = "hdd"
+
+[inputs.encrypted]
+type = "string"
+default = "no"
+"#,
+        );
+        let result = apply_defaults(&inputs, json!({}));
+        assert_eq!(result["tier"], "hdd");
+        assert_eq!(result["encrypted"], "no");
     }
 }

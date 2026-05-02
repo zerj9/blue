@@ -52,6 +52,8 @@ pub fn create_plan(
             let ds_type = providers
                 .data_source_type(&ds_config.data_type)
                 .ok_or_else(|| format!("Unknown data source type: {}", ds_config.data_type))?;
+            let resolved_config =
+                crate::schema::apply_defaults(&ds_type.schema().inputs, resolved_config);
             crate::schema::validate_inputs(&ds_type.schema().inputs, &resolved_config)
                 .map_err(|e| format!("data source '{name}': {e}"))?;
             let outputs = ds_type.read(resolved_config)?;
@@ -74,6 +76,7 @@ pub fn create_plan(
                     &output_map,
                 )?;
 
+                let resolved = crate::schema::apply_defaults(&schema.inputs, resolved);
                 crate::schema::validate_inputs(&schema.inputs, &resolved)
                     .map_err(|e| format!("resource '{name}': {e}"))?;
                 res_type.validate(&resolved)?;

@@ -1,0 +1,99 @@
+section = "Storage"
+
+[inputs.title]
+type = "string"
+required = true
+description = "Human-readable title (1-255 characters)."
+
+[inputs.size]
+type = "number"
+required = true
+description = "Storage size in GB (1-4096). Can only grow on update; the storage must be detached from any server before resizing."
+
+[inputs.zone]
+type = "string"
+required = true
+force_new = true
+description = "UpCloud zone identifier (e.g. uk-lon1, fi-hel1). Cannot be changed after creation."
+
+[inputs.tier]
+type = "string"
+default = "hdd"
+force_new = true
+description = "Storage tier: hdd, standard, or maxiops."
+
+[inputs.encrypted]
+type = "string"
+default = "no"
+force_new = true
+description = "Whether the storage is encrypted at rest: yes or no. Cannot be changed after creation."
+
+[inputs.backup_rule]
+type = "object"
+description = "Automatic backup schedule. All three nested fields must be specified together, or the block omitted entirely."
+
+[inputs.backup_rule.fields.interval]
+type = "string"
+required = true
+description = "When backups are taken: daily, mon, tue, wed, thu, fri, sat, or sun."
+
+[inputs.backup_rule.fields.time]
+type = "string"
+required = true
+description = "Time of day in UTC, HHMM format (e.g. 0430)."
+
+[inputs.backup_rule.fields.retention]
+type = "number"
+required = true
+description = "Days to retain each backup (1-1095)."
+
+[inputs.labels]
+type = "array"
+description = "Key-value labels classifying the storage."
+
+[inputs.labels.items.key]
+type = "string"
+required = true
+description = "Label key: 2-32 printable ASCII chars, must not start with underscore."
+
+[inputs.labels.items.value]
+type = "string"
+required = true
+description = "Label value: 0-255 characters."
+
+[inputs.delete_backups]
+type = "string"
+default = "keep"
+description = "What happens to backups when this storage is deleted. One of: keep (default — preserve all backups), keep_latest (delete all but the most recent), or delete (delete all backups). Has no effect until the resource is destroyed."
+
+[outputs.uuid]
+type = "string"
+description = "Unique identifier."
+
+[outputs.state]
+type = "string"
+description = "Current state: online, maintenance, cloning, etc."
+
+[outputs.access]
+type = "string"
+description = "Always 'private' for user-managed storage."
+
+[outputs.type]
+type = "string"
+description = "Storage class. Always 'normal' for user-created storage."
+
+[outputs.zone]
+type = "string"
+description = "Zone where the storage was created."
+
+[outputs.size]
+type = "number"
+description = "Current size in GB."
+
+[outputs.title]
+type = "string"
+description = "Current title."
+
+[outputs.delete_backups]
+type = "string"
+description = "Resolved value of the delete_backups input, mirrored to outputs so it is available at destroy time. Not a UpCloud-API field."

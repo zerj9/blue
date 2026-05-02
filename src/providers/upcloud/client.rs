@@ -41,4 +41,49 @@ impl UpCloudClient {
             .call()
             .map_err(|e| format!("upcloud GET {path} failed: {e}"))
     }
+
+    /// Issue an authenticated POST with a JSON body. Same status/error model
+    /// as `get` — returns the raw response for any HTTP status.
+    pub fn post<B: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<ureq::http::Response<ureq::Body>, String> {
+        let url = format!("{}{}", self.base_url, path);
+        self.agent
+            .post(&url)
+            .header("Authorization", &self.auth_header)
+            .send_json(body)
+            .map_err(|e| format!("upcloud POST {path} failed: {e}"))
+    }
+
+    /// Issue an authenticated DELETE. Path includes any query string the
+    /// caller wants (caller is responsible for URL-encoding values if needed).
+    /// Same status/error model as `get`.
+    pub fn delete(
+        &self,
+        path: &str,
+    ) -> Result<ureq::http::Response<ureq::Body>, String> {
+        let url = format!("{}{}", self.base_url, path);
+        self.agent
+            .delete(&url)
+            .header("Authorization", &self.auth_header)
+            .call()
+            .map_err(|e| format!("upcloud DELETE {path} failed: {e}"))
+    }
+
+    /// Issue an authenticated PUT with a JSON body. Same status/error model
+    /// as `get` — returns the raw response for any HTTP status.
+    pub fn put<B: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<ureq::http::Response<ureq::Body>, String> {
+        let url = format!("{}{}", self.base_url, path);
+        self.agent
+            .put(&url)
+            .header("Authorization", &self.auth_header)
+            .send_json(body)
+            .map_err(|e| format!("upcloud PUT {path} failed: {e}"))
+    }
 }

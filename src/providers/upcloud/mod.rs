@@ -1,5 +1,6 @@
 pub mod client;
 pub mod storage_data_source;
+pub mod storage_resource;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,14 +14,19 @@ use crate::provider::{DataSourceType, ProviderInstance, Providers, ResourceType}
 
 use client::UpCloudClient;
 use storage_data_source::UpCloudStorageDataSource;
+use storage_resource::UpCloudStorageResource;
 
 pub struct UpCloudProvider {
     storage_data_source: UpCloudStorageDataSource,
+    storage_resource: UpCloudStorageResource,
 }
 
 impl ProviderInstance for UpCloudProvider {
-    fn resource_type(&self, _name: &str) -> Option<&dyn ResourceType> {
-        None
+    fn resource_type(&self, name: &str) -> Option<&dyn ResourceType> {
+        match name {
+            "storage" => Some(&self.storage_resource),
+            _ => None,
+        }
     }
 
     fn data_source_type(&self, name: &str) -> Option<&dyn DataSourceType> {
@@ -99,10 +105,14 @@ pub fn register(
     let auth_header = parse_credentials(&def.config)
         .map_err(|e| format!("provider '{instance_name}': {e}"))?;
     let client = Arc::new(UpCloudClient::new(auth_header));
-    let storage_data_source = UpCloudStorageDataSource::new(client);
+    let storage_data_source = UpCloudStorageDataSource::new(Arc::clone(&client));
+    let storage_resource = UpCloudStorageResource::new(client);
     providers.register(
         instance_name,
-        Box::new(UpCloudProvider { storage_data_source }),
+        Box::new(UpCloudProvider {
+            storage_data_source,
+            storage_resource,
+        }),
     );
     Ok(())
 }
