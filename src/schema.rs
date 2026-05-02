@@ -349,7 +349,11 @@ interval_seconds = 5
         let tags = schema.inputs.iter().find(|f| f.path == "tags").unwrap();
         assert!(!tags.ordered);
 
-        let password = schema.outputs.iter().find(|o| o.path == "password").unwrap();
+        let password = schema
+            .outputs
+            .iter()
+            .find(|o| o.path == "password")
+            .unwrap();
         assert!(password.secret);
 
         let uuid = schema.outputs.iter().find(|o| o.path == "uuid").unwrap();
@@ -398,7 +402,11 @@ type = "string"
 
         let schema = parse_schema(toml).unwrap();
 
-        let rules = schema.inputs.iter().find(|f| f.path == "firewall_rules").unwrap();
+        let rules = schema
+            .inputs
+            .iter()
+            .find(|f| f.path == "firewall_rules")
+            .unwrap();
         assert!(rules.ordered);
         assert_eq!(rules.items.len(), 3);
 
@@ -425,7 +433,11 @@ type = "string"
 
         let schema = parse_schema(toml).unwrap();
 
-        let backup = schema.inputs.iter().find(|f| f.path == "backup_rule").unwrap();
+        let backup = schema
+            .inputs
+            .iter()
+            .find(|f| f.path == "backup_rule")
+            .unwrap();
         assert!(matches!(backup.field_type, FieldType::Object));
         assert!(backup.items.is_empty());
         assert_eq!(backup.fields.len(), 2);
@@ -434,7 +446,11 @@ type = "string"
         assert!(matches!(interval.field_type, FieldType::String));
         assert!(interval.required);
 
-        let retention = backup.fields.iter().find(|f| f.path == "retention").unwrap();
+        let retention = backup
+            .fields
+            .iter()
+            .find(|f| f.path == "retention")
+            .unwrap();
         assert!(matches!(retention.field_type, FieldType::Number));
         assert!(!retention.required);
     }
@@ -489,7 +505,10 @@ required = true
         );
         let value = json!({});
         let err = validate_inputs(&inputs, &value).unwrap_err();
-        assert!(err.contains("missing required field 'script'"), "got: {err}");
+        assert!(
+            err.contains("missing required field 'script'"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -572,7 +591,8 @@ type = "number"
 type = "object"
 "#,
         );
-        let value = json!({"triggers_replace": {"any": "key", "is": "fine", "nested": {"too": true}}});
+        let value =
+            json!({"triggers_replace": {"any": "key", "is": "fine", "nested": {"too": true}}});
         validate_inputs(&inputs, &value).unwrap();
     }
 
@@ -707,10 +727,7 @@ default = 30
 "#,
         );
         // Parent present, retention missing — default fills in
-        let result = apply_defaults(
-            &inputs,
-            json!({"backup_rule": {"interval": "daily"}}),
-        );
+        let result = apply_defaults(&inputs, json!({"backup_rule": {"interval": "daily"}}));
         assert_eq!(result["backup_rule"]["interval"], "daily");
         assert_eq!(result["backup_rule"]["retention"], 30);
     }

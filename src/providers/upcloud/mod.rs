@@ -47,9 +47,9 @@ fn parse_credentials(config: &HashMap<String, Value>) -> Result<String, String> 
     let password = read_optional_string_field(config, "password")?;
 
     match (token, username, password) {
-        (Some(_), Some(_), _) | (Some(_), _, Some(_)) => Err(
-            "specify either 'token' or 'username'/'password', not both".to_string(),
-        ),
+        (Some(_), Some(_), _) | (Some(_), _, Some(_)) => {
+            Err("specify either 'token' or 'username'/'password', not both".to_string())
+        }
         (Some(t), None, None) => Ok(format!("Bearer {t}")),
         (None, Some(u), Some(p)) => {
             let encoded = BASE64_STANDARD.encode(format!("{u}:{p}"));
@@ -58,8 +58,7 @@ fn parse_credentials(config: &HashMap<String, Value>) -> Result<String, String> 
         (None, Some(_), None) => Err("'username' is set but 'password' is missing".to_string()),
         (None, None, Some(_)) => Err("'password' is set but 'username' is missing".to_string()),
         (None, None, None) => Err(
-            "missing credentials: provide 'token'/'token_env' or 'username'/'password'"
-                .to_string(),
+            "missing credentials: provide 'token'/'token_env' or 'username'/'password'".to_string(),
         ),
     }
 }
@@ -102,8 +101,8 @@ pub fn register(
     instance_name: &str,
     def: &ProviderDef,
 ) -> Result<(), String> {
-    let auth_header = parse_credentials(&def.config)
-        .map_err(|e| format!("provider '{instance_name}': {e}"))?;
+    let auth_header =
+        parse_credentials(&def.config).map_err(|e| format!("provider '{instance_name}': {e}"))?;
     let client = Arc::new(UpCloudClient::new(auth_header));
     let storage_data_source = UpCloudStorageDataSource::new(Arc::clone(&client));
     let storage_resource = UpCloudStorageResource::new(client);
@@ -183,7 +182,11 @@ mod tests {
 
     #[test]
     fn parse_credentials_token_and_username_errors() {
-        let config = cfg(&[("token", "ucat_x"), ("username", "alice"), ("password", "y")]);
+        let config = cfg(&[
+            ("token", "ucat_x"),
+            ("username", "alice"),
+            ("password", "y"),
+        ]);
         let err = parse_credentials(&config).unwrap_err();
         assert!(err.contains("not both"), "got: {err}");
         assert!(err.contains("token"), "got: {err}");

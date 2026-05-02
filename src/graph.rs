@@ -76,7 +76,10 @@ impl Graph {
         for name in config.data.keys() {
             let node_key = format!("data.{name}");
             let idx = graph.node_indices[&node_key];
-            for neighbor in graph.inner.neighbors_directed(idx, petgraph::Direction::Incoming) {
+            for neighbor in graph
+                .inner
+                .neighbors_directed(idx, petgraph::Direction::Incoming)
+            {
                 let dep = &graph.inner[neighbor];
                 if dep.starts_with("resources.") {
                     return Err(format!(
@@ -88,7 +91,12 @@ impl Graph {
 
         // Validate: no cycles, cache sorted order
         graph.sorted = toposort(&graph.inner, None)
-            .map_err(|e| format!("Cycle detected involving node '{}'", graph.inner[e.node_id()]))?
+            .map_err(|e| {
+                format!(
+                    "Cycle detected involving node '{}'",
+                    graph.inner[e.node_id()]
+                )
+            })?
             .iter()
             .map(|idx| graph.inner[*idx].clone())
             .collect();
@@ -114,7 +122,12 @@ impl Graph {
         }
 
         graph.sorted = toposort(&graph.inner, None)
-            .map_err(|e| format!("Cycle detected involving node '{}'", graph.inner[e.node_id()]))?
+            .map_err(|e| {
+                format!(
+                    "Cycle detected involving node '{}'",
+                    graph.inner[e.node_id()]
+                )
+            })?
             .iter()
             .map(|idx| graph.inner[*idx].clone())
             .collect();
@@ -166,9 +179,13 @@ impl Graph {
     }
 
     fn add_edge(&mut self, from: &str, to: &str) -> Result<(), String> {
-        let from_idx = self.node_indices.get(from)
+        let from_idx = self
+            .node_indices
+            .get(from)
             .ok_or_else(|| format!("Ref target '{from}' not found in graph"))?;
-        let to_idx = self.node_indices.get(to)
+        let to_idx = self
+            .node_indices
+            .get(to)
             .ok_or_else(|| format!("Node '{to}' not found in graph"))?;
         self.inner.add_edge(*from_idx, *to_idx, ());
         Ok(())
@@ -216,7 +233,8 @@ mod tests {
 
     #[test]
     fn basic_graph_from_config() {
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [parameters.region]
 default = "uk-lon1"
 
@@ -228,13 +246,18 @@ filters = { title = "Ubuntu Server 24.04 LTS" }
 type = "upcloud.server"
 zone = "{{ parameters.region }}"
 storage = "{{ data.ubuntu.uuid }}"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let graph = Graph::from_config_and_state(&config, &empty_state()).unwrap();
         let order = graph.topological_order();
 
         // parameters and data must come before resources
-        let param_pos = order.iter().position(|n| *n == "parameters.region").unwrap();
+        let param_pos = order
+            .iter()
+            .position(|n| *n == "parameters.region")
+            .unwrap();
         let data_pos = order.iter().position(|n| *n == "data.ubuntu").unwrap();
         let res_pos = order.iter().position(|n| *n == "resources.web-01").unwrap();
         assert!(param_pos < res_pos);
@@ -243,19 +266,25 @@ storage = "{{ data.ubuntu.uuid }}"
 
     #[test]
     fn deletion_node_added() {
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [resources.web-01]
 type = "upcloud.server"
 hostname = "web-01"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut state = empty_state();
-        state.resources.insert("old-server".to_string(), ResourceState {
-            resource_type: "upcloud.server".to_string(),
-            inputs: json!({}),
-            outputs: json!({}),
-            depends_on: vec![],
-        });
+        state.resources.insert(
+            "old-server".to_string(),
+            ResourceState {
+                resource_type: "upcloud.server".to_string(),
+                inputs: json!({}),
+                outputs: json!({}),
+                depends_on: vec![],
+            },
+        );
 
         let graph = Graph::from_config_and_state(&config, &state).unwrap();
         let order = graph.topological_order();
@@ -264,7 +293,8 @@ hostname = "web-01"
 
     #[test]
     fn data_source_depends_on_resource_fails() {
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [resources.web-01]
 type = "upcloud.server"
 hostname = "web-01"
@@ -272,16 +302,23 @@ hostname = "web-01"
 [data.lookup]
 type = "upcloud.storage"
 filters = { uuid = "{{ resources.web-01.uuid }}" }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let result = Graph::from_config_and_state(&config, &empty_state());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("data sources may only depend on parameters"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("data sources may only depend on parameters")
+        );
     }
 
     #[test]
     fn cycle_detection() {
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [resources.a]
 type = "upcloud.server"
 dep = "{{ resources.b.uuid }}"
@@ -289,7 +326,9 @@ dep = "{{ resources.b.uuid }}"
 [resources.b]
 type = "upcloud.server"
 dep = "{{ resources.a.uuid }}"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let result = Graph::from_config_and_state(&config, &empty_state());
         assert!(result.is_err());
@@ -299,56 +338,77 @@ dep = "{{ resources.a.uuid }}"
     #[test]
     fn state_only_graph() {
         let mut state = empty_state();
-        state.resources.insert("server".to_string(), ResourceState {
-            resource_type: "upcloud.server".to_string(),
-            inputs: json!({}),
-            outputs: json!({"uuid": "abc"}),
-            depends_on: vec![],
-        });
-        state.resources.insert("firewall".to_string(), ResourceState {
-            resource_type: "upcloud.firewall".to_string(),
-            inputs: json!({}),
-            outputs: json!({}),
-            depends_on: vec!["resources.server".to_string()],
-        });
+        state.resources.insert(
+            "server".to_string(),
+            ResourceState {
+                resource_type: "upcloud.server".to_string(),
+                inputs: json!({}),
+                outputs: json!({"uuid": "abc"}),
+                depends_on: vec![],
+            },
+        );
+        state.resources.insert(
+            "firewall".to_string(),
+            ResourceState {
+                resource_type: "upcloud.firewall".to_string(),
+                inputs: json!({}),
+                outputs: json!({}),
+                depends_on: vec!["resources.server".to_string()],
+            },
+        );
 
         let graph = Graph::from_state(&state).unwrap();
         let order = graph.topological_order();
         let server_pos = order.iter().position(|n| *n == "resources.server").unwrap();
-        let fw_pos = order.iter().position(|n| *n == "resources.firewall").unwrap();
+        let fw_pos = order
+            .iter()
+            .position(|n| *n == "resources.firewall")
+            .unwrap();
         assert!(server_pos < fw_pos);
     }
 
     #[test]
     fn reverse_order_for_destroy() {
         let mut state = empty_state();
-        state.resources.insert("server".to_string(), ResourceState {
-            resource_type: "upcloud.server".to_string(),
-            inputs: json!({}),
-            outputs: json!({}),
-            depends_on: vec![],
-        });
-        state.resources.insert("firewall".to_string(), ResourceState {
-            resource_type: "upcloud.firewall".to_string(),
-            inputs: json!({}),
-            outputs: json!({}),
-            depends_on: vec!["resources.server".to_string()],
-        });
+        state.resources.insert(
+            "server".to_string(),
+            ResourceState {
+                resource_type: "upcloud.server".to_string(),
+                inputs: json!({}),
+                outputs: json!({}),
+                depends_on: vec![],
+            },
+        );
+        state.resources.insert(
+            "firewall".to_string(),
+            ResourceState {
+                resource_type: "upcloud.firewall".to_string(),
+                inputs: json!({}),
+                outputs: json!({}),
+                depends_on: vec!["resources.server".to_string()],
+            },
+        );
 
         let graph = Graph::from_state(&state).unwrap();
         let order = graph.reverse_topological_order();
         let server_pos = order.iter().position(|n| *n == "resources.server").unwrap();
-        let fw_pos = order.iter().position(|n| *n == "resources.firewall").unwrap();
+        let fw_pos = order
+            .iter()
+            .position(|n| *n == "resources.firewall")
+            .unwrap();
         assert!(fw_pos < server_pos); // firewall deleted before server
     }
 
     #[test]
     fn unknown_ref_fails() {
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [resources.web-01]
 type = "upcloud.server"
 storage = "{{ data.nonexistent.uuid }}"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let result = Graph::from_config_and_state(&config, &empty_state());
         assert!(result.is_err());

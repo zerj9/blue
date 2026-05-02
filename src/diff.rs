@@ -41,7 +41,7 @@ fn diff_values(schema: &Schema, old: &Value, new: &Value) -> Diff {
                 action: Action::Unchanged,
                 changes: vec![],
                 requires_stop: false,
-            }
+            };
         }
     };
 
@@ -76,7 +76,9 @@ fn diff_values(schema: &Schema, old: &Value, new: &Value) -> Diff {
                 });
                 true
             }
-            (Some(old_val), Some(new_val)) if !values_equal(old_val, new_val, field_def, child_fields) => {
+            (Some(old_val), Some(new_val))
+                if !values_equal(old_val, new_val, field_def, child_fields) =>
+            {
                 changes.push(InputChange::Modified {
                     field: key.clone(),
                     old_value: old_val.clone(),
@@ -114,7 +116,12 @@ fn diff_values(schema: &Schema, old: &Value, new: &Value) -> Diff {
 ///
 /// `field_def` is the schema definition for the current value (provides `ordered` for arrays).
 /// `fields` is the list of child FieldDefs for looking up keys when the value is an object.
-fn values_equal(old: &Value, new: &Value, field_def: Option<&FieldDef>, fields: &[FieldDef]) -> bool {
+fn values_equal(
+    old: &Value,
+    new: &Value,
+    field_def: Option<&FieldDef>,
+    fields: &[FieldDef],
+) -> bool {
     match (old, new) {
         (Value::Number(a), Value::Number(b)) => {
             // Numeric comparison: 10 == 10.0
@@ -127,14 +134,22 @@ fn values_equal(old: &Value, new: &Value, field_def: Option<&FieldDef>, fields: 
             if ordered {
                 // Positional comparison
                 a.len() == b.len()
-                    && a.iter().zip(b.iter()).all(|(av, bv)| values_equal(av, bv, item_def, item_fields))
+                    && a.iter()
+                        .zip(b.iter())
+                        .all(|(av, bv)| values_equal(av, bv, item_def, item_fields))
             } else {
                 // Set comparison via canonical serialization
                 if a.len() != b.len() {
                     return false;
                 }
-                let old_hashes: HashSet<String> = a.iter().map(|v| canonical_string(v, item_def, item_fields)).collect();
-                let new_hashes: HashSet<String> = b.iter().map(|v| canonical_string(v, item_def, item_fields)).collect();
+                let old_hashes: HashSet<String> = a
+                    .iter()
+                    .map(|v| canonical_string(v, item_def, item_fields))
+                    .collect();
+                let new_hashes: HashSet<String> = b
+                    .iter()
+                    .map(|v| canonical_string(v, item_def, item_fields))
+                    .collect();
                 old_hashes == new_hashes
             }
         }
@@ -178,7 +193,11 @@ fn canonical_string(value: &Value, field_def: Option<&FieldDef>, fields: &[Field
                 .map(|k| {
                     let child_def = fields.iter().find(|f| f.path == **k);
                     let child_fields = child_def.map(|f| f.items.as_slice()).unwrap_or(&[]);
-                    format!("{}:{}", k, canonical_string(&map[*k], child_def, child_fields))
+                    format!(
+                        "{}:{}",
+                        k,
+                        canonical_string(&map[*k], child_def, child_fields)
+                    )
                 })
                 .collect();
             format!("{{{}}}", entries.join(","))
@@ -187,7 +206,8 @@ fn canonical_string(value: &Value, field_def: Option<&FieldDef>, fields: &[Field
             let ordered = field_def.map_or(true, |f| f.ordered);
             let items = field_def.map(|f| f.items.as_slice()).unwrap_or(&[]);
             let (item_def, item_fields) = item_schema(items);
-            let mut strs: Vec<String> = arr.iter()
+            let mut strs: Vec<String> = arr
+                .iter()
                 .map(|v| canonical_string(v, item_def, item_fields))
                 .collect();
             if !ordered {
@@ -351,7 +371,8 @@ type = "string"
 
     #[test]
     fn nested_unordered_array_ignores_order() {
-        let schema = parse_schema(r#"
+        let schema = parse_schema(
+            r#"
 [inputs.rules]
 type = "array"
 
@@ -365,7 +386,9 @@ items = { type = "number" }
 
 [outputs.id]
 type = "string"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let old = json!({"rules": [{"name": "web", "ports": [80, 443]}]});
         let new = json!({"rules": [{"name": "web", "ports": [443, 80]}]});
@@ -375,7 +398,8 @@ type = "string"
 
     #[test]
     fn nested_unordered_array_detects_change() {
-        let schema = parse_schema(r#"
+        let schema = parse_schema(
+            r#"
 [inputs.rules]
 type = "array"
 
@@ -389,7 +413,9 @@ items = { type = "number" }
 
 [outputs.id]
 type = "string"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let old = json!({"rules": [{"name": "web", "ports": [80, 443]}]});
         let new = json!({"rules": [{"name": "web", "ports": [80, 8080]}]});

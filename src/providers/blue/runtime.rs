@@ -23,10 +23,7 @@ impl ScriptRuntime {
     ) -> Result<Value, String> {
         // Validate script exists
         if !script_path.exists() {
-            return Err(format!(
-                "Script file not found: {}",
-                script_path.display()
-            ));
+            return Err(format!("Script file not found: {}", script_path.display()));
         }
 
         let script = std::fs::read_to_string(script_path)
@@ -50,16 +47,18 @@ impl ScriptRuntime {
                 execute_script(&script, &context_json, log_prefix)
             })
             .await
-            .map_err(|_| format!("Script timed out after {}s: {}", timeout_secs, script_path.display()))?
+            .map_err(|_| {
+                format!(
+                    "Script timed out after {}s: {}",
+                    timeout_secs,
+                    script_path.display()
+                )
+            })?
         })
     }
 }
 
-fn execute_script(
-    script: &str,
-    context_json: &str,
-    log_prefix: &str,
-) -> Result<Value, String> {
+fn execute_script(script: &str, context_json: &str, log_prefix: &str) -> Result<Value, String> {
     let mut runtime = JsRuntime::new(RuntimeOptions::default());
 
     let full_script = format!(

@@ -22,7 +22,12 @@ pub trait ResourceType {
         new_inputs: Value,
     ) -> Result<OperationResult, String>;
     fn delete(&self, ctx: &dyn OperationCtx, outputs: &Value) -> Result<OperationResult, String>;
-    fn customize_diff(&self, _diff: &mut Diff, _inputs: &Value, _outputs: &Value) -> Result<(), String> {
+    fn customize_diff(
+        &self,
+        _diff: &mut Diff,
+        _inputs: &Value,
+        _outputs: &Value,
+    ) -> Result<(), String> {
         Ok(())
     }
 }

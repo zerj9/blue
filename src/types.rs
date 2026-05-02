@@ -56,7 +56,9 @@ pub struct Schema {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OperationResult {
-    Success { outputs: Value },
+    Success {
+        outputs: Value,
+    },
     NotFound,
     Failed {
         error: String,

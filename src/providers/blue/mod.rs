@@ -6,9 +6,7 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
-use crate::provider::{
-    DataSourceType, OperationCtx, ProviderInstance, Providers, ResourceType,
-};
+use crate::provider::{DataSourceType, OperationCtx, ProviderInstance, Providers, ResourceType};
 use crate::types::{Action, Diff, OperationResult, Schema};
 
 use runtime::ScriptRuntime;
@@ -33,19 +31,27 @@ impl ScriptResource {
     }
 
     fn resolve_script_path(&self, script: &str) -> Result<PathBuf, String> {
-        let config_dir = self.config_dir.as_ref()
+        let config_dir = self
+            .config_dir
+            .as_ref()
             .ok_or_else(|| "No config directory available for script resolution".to_string())?;
 
         let script_path = config_dir.join(script);
-        let canonical_dir = config_dir.canonicalize()
+        let canonical_dir = config_dir
+            .canonicalize()
             .map_err(|e| format!("Failed to canonicalize config directory: {e}"))?;
-        let canonical_script = script_path.canonicalize()
-            .map_err(|e| format!("Failed to resolve script path '{}': {e}", script_path.display()))?;
+        let canonical_script = script_path.canonicalize().map_err(|e| {
+            format!(
+                "Failed to resolve script path '{}': {e}",
+                script_path.display()
+            )
+        })?;
 
         if !canonical_script.starts_with(&canonical_dir) {
             return Err(format!(
                 "Script '{}' escapes config directory '{}'",
-                script, config_dir.display()
+                script,
+                config_dir.display()
             ));
         }
 
@@ -72,7 +78,8 @@ impl ResourceType for ScriptResource {
     }
 
     fn create(&self, _ctx: &dyn OperationCtx, inputs: Value) -> Result<OperationResult, String> {
-        let script = inputs.get("script")
+        let script = inputs
+            .get("script")
             .and_then(|v| v.as_str())
             .ok_or_else(|| "Missing 'script' input".to_string())?;
 
@@ -86,12 +93,9 @@ impl ResourceType for ScriptResource {
             "outputs": {}
         });
 
-        let mut result = self.runtime.run_script(
-            &script_path,
-            context,
-            self.timeout_secs(),
-            script,
-        )?;
+        let mut result =
+            self.runtime
+                .run_script(&script_path, context, self.timeout_secs(), script)?;
 
         // Store script content hash so customize_diff can detect file changes
         if let Some(obj) = result.as_object_mut() {
@@ -123,12 +127,15 @@ impl ResourceType for ScriptResource {
 
     fn delete(&self, _ctx: &dyn OperationCtx, _outputs: &Value) -> Result<OperationResult, String> {
         // No-op — blue.script has no external state to clean up
-        Ok(OperationResult::Success {
-            outputs: json!({}),
-        })
+        Ok(OperationResult::Success { outputs: json!({}) })
     }
 
-    fn customize_diff(&self, diff: &mut Diff, inputs: &Value, outputs: &Value) -> Result<(), String> {
+    fn customize_diff(
+        &self,
+        diff: &mut Diff,
+        inputs: &Value,
+        outputs: &Value,
+    ) -> Result<(), String> {
         // If already creating or deleting, nothing to customize
         if diff.action == Action::Create || diff.action == Action::Delete {
             return Ok(());
@@ -138,7 +145,10 @@ impl ResourceType for ScriptResource {
         let Some(script) = inputs.get("script").and_then(|v| v.as_str()) else {
             return Ok(());
         };
-        let stored_hash = outputs.get("__script_hash__").and_then(|v| v.as_str()).unwrap_or("");
+        let stored_hash = outputs
+            .get("__script_hash__")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let current_hash = self.hash_script_file(script).unwrap_or_default();
 
         if !stored_hash.is_empty() && current_hash != stored_hash {
@@ -173,19 +183,27 @@ impl ScriptDataSource {
     }
 
     fn resolve_script_path(&self, script: &str) -> Result<PathBuf, String> {
-        let config_dir = self.config_dir.as_ref()
+        let config_dir = self
+            .config_dir
+            .as_ref()
             .ok_or_else(|| "No config directory available for script resolution".to_string())?;
 
         let script_path = config_dir.join(script);
-        let canonical_dir = config_dir.canonicalize()
+        let canonical_dir = config_dir
+            .canonicalize()
             .map_err(|e| format!("Failed to canonicalize config directory: {e}"))?;
-        let canonical_script = script_path.canonicalize()
-            .map_err(|e| format!("Failed to resolve script path '{}': {e}", script_path.display()))?;
+        let canonical_script = script_path.canonicalize().map_err(|e| {
+            format!(
+                "Failed to resolve script path '{}': {e}",
+                script_path.display()
+            )
+        })?;
 
         if !canonical_script.starts_with(&canonical_dir) {
             return Err(format!(
                 "Script '{}' escapes config directory '{}'",
-                script, config_dir.display()
+                script,
+                config_dir.display()
             ));
         }
 
@@ -203,7 +221,8 @@ impl DataSourceType for ScriptDataSource {
     }
 
     fn read(&self, inputs: Value) -> Result<Value, String> {
-        let script = inputs.get("script")
+        let script = inputs
+            .get("script")
             .and_then(|v| v.as_str())
             .ok_or_else(|| "Missing 'script' input".to_string())?;
 
@@ -215,12 +234,8 @@ impl DataSourceType for ScriptDataSource {
             "inputs": script_inputs
         });
 
-        self.runtime.run_script(
-            &script_path,
-            context,
-            self.timeout_secs(),
-            script,
-        )
+        self.runtime
+            .run_script(&script_path, context, self.timeout_secs(), script)
     }
 }
 

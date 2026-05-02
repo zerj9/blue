@@ -83,7 +83,9 @@ pub fn create_plan(
 
                 let old_inputs = state.resources.get(name).map(|r| &r.inputs);
                 let mut diff = diff_resource(schema, old_inputs, Some(&resolved));
-                let current_outputs = state.resources.get(name)
+                let current_outputs = state
+                    .resources
+                    .get(name)
                     .map(|r| &r.outputs)
                     .cloned()
                     .unwrap_or_default();
@@ -95,9 +97,7 @@ pub fn create_plan(
                 let res_state = &state.resources[name];
                 let schema = providers
                     .resource_type(&res_state.resource_type)
-                    .ok_or_else(|| {
-                        format!("Unknown resource type: {}", res_state.resource_type)
-                    })?
+                    .ok_or_else(|| format!("Unknown resource type: {}", res_state.resource_type))?
                     .schema();
                 let diff = diff_resource(schema, Some(&res_state.inputs), None);
                 diffs.insert(node.to_string(), diff);
@@ -196,7 +196,10 @@ fn cascade_replacements(
             let Some(diff) = diffs.get(*node) else {
                 continue;
             };
-            if diff.action == Action::Replace || diff.action == Action::Create || diff.action == Action::Delete {
+            if diff.action == Action::Replace
+                || diff.action == Action::Create
+                || diff.action == Action::Delete
+            {
                 continue;
             }
 
@@ -211,7 +214,10 @@ fn cascade_replacements(
 
             let mut needs_replace = false;
             for (field_name, value) in &res_def.config {
-                let is_force_new = schema.inputs.iter().any(|f| f.path == *field_name && f.force_new);
+                let is_force_new = schema
+                    .inputs
+                    .iter()
+                    .any(|f| f.path == *field_name && f.force_new);
                 if is_force_new && refs_to_replaced(value, &replaced)? {
                     needs_replace = true;
                     break;
@@ -278,12 +284,15 @@ mod tests {
 
     #[test]
     fn plan_create_new_resource() {
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [resources.test]
 type = "blue.script"
 script = "test.js"
 triggers_replace = { key = "value" }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let state = State::new();
         let providers = setup_providers();
@@ -299,12 +308,15 @@ triggers_replace = { key = "value" }
         let config = parse_resource_config("").unwrap();
 
         let mut state = State::new();
-        state.resources.insert("old".to_string(), ResourceState {
-            resource_type: "blue.script".to_string(),
-            inputs: json!({"script": "old.js"}),
-            outputs: json!({}),
-            depends_on: vec![],
-        });
+        state.resources.insert(
+            "old".to_string(),
+            ResourceState {
+                resource_type: "blue.script".to_string(),
+                inputs: json!({"script": "old.js"}),
+                outputs: json!({}),
+                depends_on: vec![],
+            },
+        );
 
         let providers = setup_providers();
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
@@ -316,20 +328,26 @@ triggers_replace = { key = "value" }
 
     #[test]
     fn plan_unchanged_resource() {
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [resources.test]
 type = "blue.script"
 script = "test.js"
 triggers_replace = { key = "value" }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut state = State::new();
-        state.resources.insert("test".to_string(), ResourceState {
-            resource_type: "blue.script".to_string(),
-            inputs: json!({"script": "test.js", "triggers_replace": {"key": "value"}}),
-            outputs: json!({}),
-            depends_on: vec![],
-        });
+        state.resources.insert(
+            "test".to_string(),
+            ResourceState {
+                resource_type: "blue.script".to_string(),
+                inputs: json!({"script": "test.js", "triggers_replace": {"key": "value"}}),
+                outputs: json!({}),
+                depends_on: vec![],
+            },
+        );
 
         let providers = setup_providers();
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
@@ -339,20 +357,26 @@ triggers_replace = { key = "value" }
 
     #[test]
     fn plan_replace_on_force_new_change() {
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [resources.test]
 type = "blue.script"
 script = "new_script.js"
 triggers_replace = { key = "value" }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut state = State::new();
-        state.resources.insert("test".to_string(), ResourceState {
-            resource_type: "blue.script".to_string(),
-            inputs: json!({"script": "old_script.js", "triggers_replace": {"key": "value"}}),
-            outputs: json!({}),
-            depends_on: vec![],
-        });
+        state.resources.insert(
+            "test".to_string(),
+            ResourceState {
+                resource_type: "blue.script".to_string(),
+                inputs: json!({"script": "old_script.js", "triggers_replace": {"key": "value"}}),
+                outputs: json!({}),
+                depends_on: vec![],
+            },
+        );
 
         let providers = setup_providers();
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
@@ -363,7 +387,8 @@ triggers_replace = { key = "value" }
 
     #[test]
     fn plan_with_parameter() {
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [parameters.name]
 default = "test-server"
 
@@ -371,7 +396,9 @@ default = "test-server"
 type = "blue.script"
 script = "test.js"
 triggers_replace = { name = "{{ parameters.name }}" }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let state = State::new();
         let providers = setup_providers();

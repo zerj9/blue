@@ -98,11 +98,7 @@ impl ResourceType for UpCloudStorageResource {
         &self.schema
     }
 
-    fn create(
-        &self,
-        ctx: &dyn OperationCtx,
-        inputs: Value,
-    ) -> Result<OperationResult, String> {
+    fn create(&self, ctx: &dyn OperationCtx, inputs: Value) -> Result<OperationResult, String> {
         let storage = self.create_storage(&inputs)?;
 
         // Persist the uuid as soon as we have it, so a crash before this
@@ -126,7 +122,9 @@ impl ResourceType for UpCloudStorageResource {
                 // delete_backups isn't a UpCloud field — carry it forward
                 // from the previously stored outputs so it survives refresh.
                 let new_outputs = extract_outputs(&storage, outputs.get("delete_backups"));
-                Ok(OperationResult::Success { outputs: new_outputs })
+                Ok(OperationResult::Success {
+                    outputs: new_outputs,
+                })
             }
             None => Ok(OperationResult::NotFound),
         }
@@ -141,19 +139,13 @@ impl ResourceType for UpCloudStorageResource {
         let uuid = old_outputs
             .get("uuid")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                "upcloud.storage update: missing 'uuid' in old outputs".to_string()
-            })?;
+            .ok_or_else(|| "upcloud.storage update: missing 'uuid' in old outputs".to_string())?;
         let storage = self.modify_storage(uuid, &new_inputs)?;
         let outputs = extract_outputs(&storage, new_inputs.get("delete_backups"));
         Ok(OperationResult::Success { outputs })
     }
 
-    fn delete(
-        &self,
-        _ctx: &dyn OperationCtx,
-        outputs: &Value,
-    ) -> Result<OperationResult, String> {
+    fn delete(&self, _ctx: &dyn OperationCtx, outputs: &Value) -> Result<OperationResult, String> {
         let uuid = outputs
             .get("uuid")
             .and_then(|v| v.as_str())
@@ -390,8 +382,18 @@ mod tests {
         assert_eq!(storage.get("zone").unwrap(), "fi-hel1");
         assert_eq!(storage.get("tier").unwrap(), "maxiops");
         assert_eq!(storage.get("encrypted").unwrap(), "yes");
-        assert_eq!(storage.get("backup_rule").unwrap().get("retention").unwrap(), "14");
-        assert_eq!(storage.get("backup_rule").unwrap().get("time").unwrap(), "0430");
+        assert_eq!(
+            storage
+                .get("backup_rule")
+                .unwrap()
+                .get("retention")
+                .unwrap(),
+            "14"
+        );
+        assert_eq!(
+            storage.get("backup_rule").unwrap().get("time").unwrap(),
+            "0430"
+        );
         assert!(storage.get("labels").unwrap().as_array().unwrap().len() == 1);
         // delete_backups is a Blue-side concern; should NOT be sent to UpCloud
         assert!(storage.get("delete_backups").is_none());
@@ -476,11 +478,7 @@ mod tests {
             },
         });
         let body = build_modify_body(&inputs);
-        let rule = body
-            .get("storage")
-            .unwrap()
-            .get("backup_rule")
-            .unwrap();
+        let rule = body.get("storage").unwrap().get("backup_rule").unwrap();
         assert_eq!(rule.get("interval").unwrap(), "mon");
         assert_eq!(rule.get("time").unwrap(), "0200");
         assert_eq!(rule.get("retention").unwrap(), "7");
@@ -499,7 +497,11 @@ mod tests {
         let storage = body.get("storage").unwrap().as_object().unwrap();
         assert!(storage.contains_key("backup_rule"));
         let rule = storage.get("backup_rule").unwrap().as_object().unwrap();
-        assert!(rule.is_empty(), "backup_rule should be empty object to clear, got {:?}", rule);
+        assert!(
+            rule.is_empty(),
+            "backup_rule should be empty object to clear, got {:?}",
+            rule
+        );
         // Labels still uses the omit-if-absent pattern (known limitation).
         assert!(!storage.contains_key("labels"));
     }

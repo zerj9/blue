@@ -33,8 +33,8 @@ struct StorageDetailResponse {
 
 impl UpCloudStorageDataSource {
     pub fn new(client: Arc<UpCloudClient>) -> Self {
-        let schema = crate::schema::parse_schema(SCHEMA)
-            .expect("upcloud storage schema must be valid");
+        let schema =
+            crate::schema::parse_schema(SCHEMA).expect("upcloud storage schema must be valid");
         UpCloudStorageDataSource { schema, client }
     }
 
@@ -94,14 +94,12 @@ impl DataSourceType for UpCloudStorageDataSource {
         // instead of pulling the full storage list. Other filter keys (if
         // any) are then verified against the returned storage.
         if let Some(uuid) = filters.get("uuid").and_then(|v| v.as_str()) {
-            let storage = self
-                .get_storage(uuid)?
-                .ok_or_else(|| {
-                    format!(
-                        "no upcloud storage matched filters {}",
-                        filters_to_string(filters)
-                    )
-                })?;
+            let storage = self.get_storage(uuid)?.ok_or_else(|| {
+                format!(
+                    "no upcloud storage matched filters {}",
+                    filters_to_string(filters)
+                )
+            })?;
 
             let extras: Map<String, Value> = filters
                 .iter()
@@ -179,7 +177,10 @@ mod tests {
     use serde_json::json;
 
     fn filter_map(pairs: &[(&str, Value)]) -> Map<String, Value> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     #[test]
@@ -216,7 +217,10 @@ mod tests {
         ];
         let filters = filter_map(&[("type", json!("template"))]);
         let err = find_match(&storages, &filters).unwrap_err();
-        assert!(err.contains("2 upcloud storage entries matched"), "got: {err}");
+        assert!(
+            err.contains("2 upcloud storage entries matched"),
+            "got: {err}"
+        );
         assert!(err.contains("expected exactly one"), "got: {err}");
     }
 
@@ -291,7 +295,10 @@ mod tests {
                 .expect("UPCLOUD_TOKEN or UPCLOUD_USERNAME must be set");
             let password = std::env::var("UPCLOUD_PASSWORD")
                 .expect("UPCLOUD_PASSWORD must be set when using UPCLOUD_USERNAME");
-            format!("Basic {}", BASE64_STANDARD.encode(format!("{username}:{password}")))
+            format!(
+                "Basic {}",
+                BASE64_STANDARD.encode(format!("{username}:{password}"))
+            )
         };
 
         let client = Arc::new(UpCloudClient::new(header));

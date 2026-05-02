@@ -78,18 +78,18 @@ pub fn execute_deploy(
             Action::Create => execute_with_retry(max_attempts, interval, &ctx, || {
                 res_type.create(&ctx, step.resolved_inputs.clone().unwrap_or_default())
             }),
-            Action::Update => {
-                execute_with_retry(max_attempts, interval, &ctx, || {
-                    let old_outputs = get_outputs(&state_arc, &step.name);
-                    res_type.update(&ctx, &old_outputs, step.resolved_inputs.clone().unwrap_or_default())
-                })
-            }
-            Action::Delete => {
-                execute_with_retry(max_attempts, interval, &ctx, || {
-                    let outputs = get_outputs(&state_arc, &step.name);
-                    res_type.delete(&ctx, &outputs)
-                })
-            }
+            Action::Update => execute_with_retry(max_attempts, interval, &ctx, || {
+                let old_outputs = get_outputs(&state_arc, &step.name);
+                res_type.update(
+                    &ctx,
+                    &old_outputs,
+                    step.resolved_inputs.clone().unwrap_or_default(),
+                )
+            }),
+            Action::Delete => execute_with_retry(max_attempts, interval, &ctx, || {
+                let outputs = get_outputs(&state_arc, &step.name);
+                res_type.delete(&ctx, &outputs)
+            }),
             Action::Replace => {
                 let delete_result = execute_with_retry(max_attempts, interval, &ctx, || {
                     let outputs = get_outputs(&state_arc, &step.name);
@@ -103,7 +103,10 @@ pub fn execute_deploy(
                     }
                     Ok(OperationResult::Failed { error, .. }) => {
                         sync_state(state, &state_arc);
-                        return Err(format!("Failed to delete '{}' for replace: {error}", step.name));
+                        return Err(format!(
+                            "Failed to delete '{}' for replace: {error}",
+                            step.name
+                        ));
                     }
                     Err(e) => {
                         sync_state(state, &state_arc);
@@ -184,11 +187,15 @@ where
                 if let Some(ref o) = outputs {
                     ctx.save(o);
                 }
-                eprintln!("  Attempt {attempt}/{max_attempts} failed: {error}, retrying in {interval}s...");
+                eprintln!(
+                    "  Attempt {attempt}/{max_attempts} failed: {error}, retrying in {interval}s..."
+                );
                 thread::sleep(Duration::from_secs(interval));
             }
             Err(e) if attempt < max_attempts => {
-                eprintln!("  Attempt {attempt}/{max_attempts} error: {e}, retrying in {interval}s...");
+                eprintln!(
+                    "  Attempt {attempt}/{max_attempts} error: {e}, retrying in {interval}s..."
+                );
                 thread::sleep(Duration::from_secs(interval));
             }
             result => return result,
@@ -198,8 +205,11 @@ where
 }
 
 fn get_outputs(state_arc: &Arc<Mutex<State>>, name: &str) -> Value {
-    state_arc.lock().unwrap()
-        .resources.get(name)
+    state_arc
+        .lock()
+        .unwrap()
+        .resources
+        .get(name)
         .map(|r| r.outputs.clone())
         .unwrap_or_default()
 }
@@ -224,14 +234,8 @@ mod tests {
         fs::create_dir_all(&tmp_dir).unwrap();
 
         // Write a dummy script that returns the inputs as outputs
-        fs::write(
-            tmp_dir.join("test.js"),
-            "return context.inputs;",
-        ).unwrap();
-        fs::write(
-            tmp_dir.join("new.js"),
-            "return context.inputs;",
-        ).unwrap();
+        fs::write(tmp_dir.join("test.js"), "return context.inputs;").unwrap();
+        fs::write(tmp_dir.join("new.js"), "return context.inputs;").unwrap();
 
         let mut providers = Providers::new();
         blue::register(&mut providers, Some(tmp_dir.clone()));
@@ -242,12 +246,15 @@ mod tests {
     #[test]
     fn deploy_create() {
         let (providers, path, tmp_dir) = setup();
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [resources.test]
 type = "blue.script"
 script = "test.js"
 triggers_replace = { key = "value" }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut state = State::new();
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
@@ -265,12 +272,15 @@ triggers_replace = { key = "value" }
         let config = parse_resource_config("").unwrap();
 
         let mut state = State::new();
-        state.resources.insert("old".to_string(), ResourceState {
-            resource_type: "blue.script".to_string(),
-            inputs: json!({"script": "old.js"}),
-            outputs: json!({}),
-            depends_on: vec![],
-        });
+        state.resources.insert(
+            "old".to_string(),
+            ResourceState {
+                resource_type: "blue.script".to_string(),
+                inputs: json!({"script": "old.js"}),
+                outputs: json!({}),
+                depends_on: vec![],
+            },
+        );
 
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
         execute_deploy(&plan, &mut state, Path::new(&path), &providers).unwrap();
@@ -282,20 +292,26 @@ triggers_replace = { key = "value" }
     #[test]
     fn deploy_replace() {
         let (providers, path, tmp_dir) = setup();
-        let config = parse_resource_config(r#"
+        let config = parse_resource_config(
+            r#"
 [resources.test]
 type = "blue.script"
 script = "new.js"
 triggers_replace = { key = "value" }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut state = State::new();
-        state.resources.insert("test".to_string(), ResourceState {
-            resource_type: "blue.script".to_string(),
-            inputs: json!({"script": "old.js", "triggers_replace": {"key": "value"}}),
-            outputs: json!({"old": true}),
-            depends_on: vec![],
-        });
+        state.resources.insert(
+            "test".to_string(),
+            ResourceState {
+                resource_type: "blue.script".to_string(),
+                inputs: json!({"script": "old.js", "triggers_replace": {"key": "value"}}),
+                outputs: json!({"old": true}),
+                depends_on: vec![],
+            },
+        );
 
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
         assert_eq!(plan.steps[0].action, Action::Replace);

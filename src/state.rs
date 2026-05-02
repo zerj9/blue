@@ -97,7 +97,10 @@ mod tests {
         assert_eq!(loaded.resources.len(), 1);
         assert_eq!(loaded.resources["web-01"].resource_type, "upcloud.server");
         assert_eq!(loaded.resources["web-01"].outputs["uuid"], "abc-123");
-        assert_eq!(loaded.resources["web-01"].depends_on, vec!["resources.object-store"]);
+        assert_eq!(
+            loaded.resources["web-01"].depends_on,
+            vec!["resources.object-store"]
+        );
 
         fs::remove_file(path).ok();
     }

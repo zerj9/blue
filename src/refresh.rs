@@ -5,11 +5,7 @@ use crate::provider::Providers;
 use crate::state::{State, write_state};
 use crate::types::OperationResult;
 
-pub fn refresh(
-    state: &mut State,
-    state_path: &Path,
-    providers: &Providers,
-) -> Result<(), String> {
+pub fn refresh(state: &mut State, state_path: &Path, providers: &Providers) -> Result<(), String> {
     let graph = Graph::from_state(state)?;
     let order = graph.topological_order();
 
@@ -30,7 +26,9 @@ pub fn refresh(
                 state.resources.get_mut(name).unwrap().outputs = outputs;
             }
             Ok(OperationResult::NotFound) => {
-                eprintln!("  Warning: resource '{name}' not found at provider, removing from state");
+                eprintln!(
+                    "  Warning: resource '{name}' not found at provider, removing from state"
+                );
                 state.resources.remove(name);
             }
             Ok(OperationResult::Failed { error, .. }) => {
@@ -46,11 +44,7 @@ pub fn refresh(
     Ok(())
 }
 
-pub fn destroy(
-    state: &mut State,
-    state_path: &Path,
-    providers: &Providers,
-) -> Result<(), String> {
+pub fn destroy(state: &mut State, state_path: &Path, providers: &Providers) -> Result<(), String> {
     let graph = Graph::from_state(state)?;
     let order = graph.reverse_topological_order();
 
@@ -116,12 +110,15 @@ mod tests {
     fn refresh_updates_outputs() {
         let (providers, path) = setup();
         let mut state = State::new();
-        state.resources.insert("test".to_string(), ResourceState {
-            resource_type: "blue.script".to_string(),
-            inputs: json!({"script": "test.js"}),
-            outputs: json!({"result": "old"}),
-            depends_on: vec![],
-        });
+        state.resources.insert(
+            "test".to_string(),
+            ResourceState {
+                resource_type: "blue.script".to_string(),
+                inputs: json!({"script": "test.js"}),
+                outputs: json!({"result": "old"}),
+                depends_on: vec![],
+            },
+        );
 
         refresh(&mut state, Path::new(&path), &providers).unwrap();
         // Script resource read returns stored outputs unchanged
@@ -134,18 +131,24 @@ mod tests {
     fn destroy_removes_all() {
         let (providers, path) = setup();
         let mut state = State::new();
-        state.resources.insert("a".to_string(), ResourceState {
-            resource_type: "blue.script".to_string(),
-            inputs: json!({}),
-            outputs: json!({}),
-            depends_on: vec![],
-        });
-        state.resources.insert("b".to_string(), ResourceState {
-            resource_type: "blue.script".to_string(),
-            inputs: json!({}),
-            outputs: json!({}),
-            depends_on: vec!["resources.a".to_string()],
-        });
+        state.resources.insert(
+            "a".to_string(),
+            ResourceState {
+                resource_type: "blue.script".to_string(),
+                inputs: json!({}),
+                outputs: json!({}),
+                depends_on: vec![],
+            },
+        );
+        state.resources.insert(
+            "b".to_string(),
+            ResourceState {
+                resource_type: "blue.script".to_string(),
+                inputs: json!({}),
+                outputs: json!({}),
+                depends_on: vec!["resources.a".to_string()],
+            },
+        );
 
         destroy(&mut state, Path::new(&path), &providers).unwrap();
         assert!(state.resources.is_empty());

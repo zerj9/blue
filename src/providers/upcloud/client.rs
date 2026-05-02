@@ -30,10 +30,7 @@ impl UpCloudClient {
     /// level failures (network, TLS, etc.). Callers are responsible for status
     /// checking, body parsing, and any per-endpoint translation (e.g. 404 →
     /// domain-level "not found").
-    pub fn get(
-        &self,
-        path: &str,
-    ) -> Result<ureq::http::Response<ureq::Body>, String> {
+    pub fn get(&self, path: &str) -> Result<ureq::http::Response<ureq::Body>, String> {
         let url = format!("{}{}", self.base_url, path);
         self.agent
             .get(&url)
@@ -60,10 +57,7 @@ impl UpCloudClient {
     /// Issue an authenticated DELETE. Path includes any query string the
     /// caller wants (caller is responsible for URL-encoding values if needed).
     /// Same status/error model as `get`.
-    pub fn delete(
-        &self,
-        path: &str,
-    ) -> Result<ureq::http::Response<ureq::Body>, String> {
+    pub fn delete(&self, path: &str) -> Result<ureq::http::Response<ureq::Body>, String> {
         let url = format!("{}{}", self.base_url, path);
         self.agent
             .delete(&url)

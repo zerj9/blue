@@ -96,8 +96,8 @@ fn parse_segment(s: &str) -> PathSegment {
     }
 }
 
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// Resolve all {{ }} refs in a Value tree using the output map.
 pub fn resolve_value(value: &Value, outputs: &HashMap<String, Value>) -> Result<Value, String> {
@@ -184,7 +184,11 @@ fn resolve_ref(r: &Ref, outputs: &HashMap<String, Value>) -> Result<Value, Strin
                 match matches.len() {
                     0 => return Err(format!("Filter matched zero elements in '{dep_key}'")),
                     1 => matches[0],
-                    n => return Err(format!("Filter matched {n} elements in '{dep_key}', expected 1")),
+                    n => {
+                        return Err(format!(
+                            "Filter matched {n} elements in '{dep_key}', expected 1"
+                        ));
+                    }
                 }
             }
         };
@@ -239,8 +243,7 @@ mod tests {
 
     #[test]
     fn ref_with_filter() {
-        let refs =
-            extract_refs("{{ resources.x.endpoints[type=public].domain_name }}").unwrap();
+        let refs = extract_refs("{{ resources.x.endpoints[type=public].domain_name }}").unwrap();
         assert_eq!(
             refs[0].path,
             vec![
@@ -253,9 +256,8 @@ mod tests {
 
     #[test]
     fn ref_with_multiple_filters() {
-        let refs =
-            extract_refs("{{ resources.x.endpoints[type=public,family=IPv4].domain_name }}")
-                .unwrap();
+        let refs = extract_refs("{{ resources.x.endpoints[type=public,family=IPv4].domain_name }}")
+            .unwrap();
         assert_eq!(
             refs[0].path,
             vec![
@@ -310,14 +312,17 @@ mod tests {
         map.insert("parameters.name".into(), json!("web-01"));
         map.insert("parameters.disk_size".into(), json!(10));
         map.insert("data.ubuntu".into(), json!({"uuid": "img-123"}));
-        map.insert("resources.web-01".into(), json!({
-            "uuid": "srv-456",
-            "ip": "1.2.3.4",
-            "endpoints": [
-                {"type": "public", "family": "IPv4", "address": "1.2.3.4"},
-                {"type": "private", "family": "IPv4", "address": "10.0.0.1"},
-            ]
-        }));
+        map.insert(
+            "resources.web-01".into(),
+            json!({
+                "uuid": "srv-456",
+                "ip": "1.2.3.4",
+                "endpoints": [
+                    {"type": "public", "family": "IPv4", "address": "1.2.3.4"},
+                    {"type": "private", "family": "IPv4", "address": "10.0.0.1"},
+                ]
+            }),
+        );
         map
     }
 
