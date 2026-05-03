@@ -80,4 +80,19 @@ impl UpCloudClient {
             .send_json(body)
             .map_err(|e| format!("upcloud PUT {path} failed: {e}"))
     }
+
+    /// Issue an authenticated PATCH with a JSON body. Same status/error model
+    /// as `get` — returns the raw response for any HTTP status.
+    pub fn patch<B: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<ureq::http::Response<ureq::Body>, String> {
+        let url = format!("{}{}", self.base_url, path);
+        self.agent
+            .patch(&url)
+            .header("Authorization", &self.auth_header)
+            .send_json(body)
+            .map_err(|e| format!("upcloud PATCH {path} failed: {e}"))
+    }
 }

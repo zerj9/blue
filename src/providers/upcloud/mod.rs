@@ -1,4 +1,5 @@
 pub mod client;
+pub mod managed_object_storage_resource;
 pub mod storage_data_source;
 pub mod storage_resource;
 
@@ -13,18 +14,21 @@ use crate::config::ProviderDef;
 use crate::provider::{DataSourceType, ProviderInstance, Providers, ResourceType};
 
 use client::UpCloudClient;
+use managed_object_storage_resource::UpCloudManagedObjectStorageResource;
 use storage_data_source::UpCloudStorageDataSource;
 use storage_resource::UpCloudStorageResource;
 
 pub struct UpCloudProvider {
     storage_data_source: UpCloudStorageDataSource,
     storage_resource: UpCloudStorageResource,
+    managed_object_storage_resource: UpCloudManagedObjectStorageResource,
 }
 
 impl ProviderInstance for UpCloudProvider {
     fn resource_type(&self, name: &str) -> Option<&dyn ResourceType> {
         match name {
             "storage" => Some(&self.storage_resource),
+            "managed_object_storage" => Some(&self.managed_object_storage_resource),
             _ => None,
         }
     }
@@ -105,12 +109,15 @@ pub fn register(
         parse_credentials(&def.config).map_err(|e| format!("provider '{instance_name}': {e}"))?;
     let client = Arc::new(UpCloudClient::new(auth_header));
     let storage_data_source = UpCloudStorageDataSource::new(Arc::clone(&client));
-    let storage_resource = UpCloudStorageResource::new(client);
+    let storage_resource = UpCloudStorageResource::new(Arc::clone(&client));
+    let managed_object_storage_resource =
+        UpCloudManagedObjectStorageResource::new(client);
     providers.register(
         instance_name,
         Box::new(UpCloudProvider {
             storage_data_source,
             storage_resource,
+            managed_object_storage_resource,
         }),
     );
     Ok(())

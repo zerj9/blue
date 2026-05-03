@@ -1,0 +1,104 @@
+section = "Managed Object Storage"
+
+[inputs.name]
+type = "string"
+required = true
+description = "Service name. 1-64 characters from [a-zA-Z0-9_-]. Must be unique within your UpCloud account."
+
+[inputs.region]
+type = "string"
+required = true
+force_new = true
+description = "UpCloud region (e.g. europe-1). Cannot be changed after creation."
+
+[inputs.configured_status]
+type = "string"
+default = "started"
+description = "Customer-managed desired state: 'started' or 'stopped'."
+
+[inputs.termination_protection]
+type = "boolean"
+default = false
+description = "When true, the service cannot be deleted or stopped. Must be set to false and re-deployed before destroy."
+
+[inputs.networks]
+type = "array"
+description = "Networks attached to the service (max 8). Private networks must reside in the same region as the service."
+
+[inputs.networks.items.name]
+type = "string"
+required = true
+description = "Network name within the service."
+
+[inputs.networks.items.type]
+type = "string"
+required = true
+description = "Network type: 'public' or 'private'."
+
+[inputs.networks.items.family]
+type = "string"
+required = true
+description = "Address family: 'IPv4'."
+
+[inputs.networks.items.uuid]
+type = "string"
+description = "SDN private network UUID. Required when type = 'private'."
+
+[inputs.labels]
+type = "array"
+description = "Key-value labels for filtering (max 255)."
+
+[inputs.labels.items.key]
+type = "string"
+required = true
+description = "Label key."
+
+[inputs.labels.items.value]
+type = "string"
+required = true
+description = "Label value."
+
+[inputs.force_destroy]
+type = "boolean"
+default = false
+description = "If true, destroy passes ?force=true so the service is removed even if it still contains buckets, users, or policies. If false (default), UpCloud requires the service to be empty before delete."
+
+[outputs.uuid]
+type = "string"
+description = "Service UUID."
+
+[outputs.name]
+type = "string"
+description = "Current service name."
+
+[outputs.region]
+type = "string"
+description = "Region where the service was created."
+
+[outputs.configured_status]
+type = "string"
+description = "Customer-managed desired status."
+
+[outputs.operational_state]
+type = "string"
+description = "Live state reported by UpCloud (running, stopped, pending, setup-checkup, ...)."
+
+[outputs.termination_protection]
+type = "boolean"
+description = "Whether termination protection is currently enabled."
+
+[outputs.created_at]
+type = "string"
+description = "ISO 8601 creation timestamp."
+
+[outputs.updated_at]
+type = "string"
+description = "ISO 8601 last-modified timestamp."
+
+[outputs.endpoints]
+type = "array"
+description = "S3, IAM and STS endpoints exposed by the service. Each entry has domain_name, mode, type, and (for api endpoints) iam_url and sts_url."
+
+[outputs.force_destroy]
+type = "boolean"
+description = "Mirrored value of the force_destroy input, available at destroy time. Not a UpCloud-API field."
