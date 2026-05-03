@@ -31,6 +31,12 @@ const OUTPUT_FIELDS: &[&str] = &[
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
 const POLL_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// How many consecutive transport-level GET failures the polling loop will
+/// tolerate before giving up. Cloud APIs behind load balancers occasionally
+/// drop keep-alive connections without a TLS close_notify; 3 in a row is
+/// almost certainly a real outage rather than that noise.
+const POLL_MAX_CONSECUTIVE_ERRORS: u32 = 3;
+
 pub struct UpCloudManagedObjectStorageResource {
     schema: Schema,
     client: Arc<UpCloudClient>,
@@ -103,31 +109,61 @@ impl UpCloudManagedObjectStorageResource {
 
     /// Poll the service until `operational_state` matches the target derived
     /// from `configured_status`, or `POLL_TIMEOUT` elapses. Returns the latest
-    /// service body. A 404 mid-poll is treated as an error — the service
-    /// existed a moment ago, so vanishing means something went wrong.
+    /// service body.
+    ///
+    /// Transport failures from `get_service` (e.g. the rustls "peer closed
+    /// connection without sending TLS close_notify" you get when a stale
+    /// keep-alive is reused against a load balancer) are tolerated up to
+    /// `max_consecutive_errors` in a row before bailing out. The counter
+    /// resets on every successful response. A 404 (`Ok(None)`) is still
+    /// terminal — that means the service was deleted under us, not a flaky
+    /// connection.
     fn poll_until_target_state(
         &self,
         uuid: &str,
         configured_status: &str,
+        max_consecutive_errors: u32,
     ) -> Result<Value, String> {
         let target = target_operational_state(configured_status);
         let deadline = Instant::now() + POLL_TIMEOUT;
+        let mut consecutive_errors: u32 = 0;
         loop {
-            let service = self
-                .get_service(uuid)?
-                .ok_or_else(|| format!("upcloud service {uuid} disappeared while polling"))?;
-            let state = service
-                .get("operational_state")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if state == target {
-                return Ok(service);
-            }
-            if Instant::now() >= deadline {
-                return Err(format!(
-                    "upcloud service {uuid} did not reach operational_state '{target}' within {}s; last state was '{state}'",
-                    POLL_TIMEOUT.as_secs()
-                ));
+            match self.get_service(uuid) {
+                Ok(Some(service)) => {
+                    consecutive_errors = 0;
+                    let state = service
+                        .get("operational_state")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if state == target {
+                        return Ok(service);
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(format!(
+                            "upcloud service {uuid} did not reach operational_state '{target}' within {}s; last state was '{state}'",
+                            POLL_TIMEOUT.as_secs()
+                        ));
+                    }
+                }
+                Ok(None) => {
+                    return Err(format!(
+                        "upcloud service {uuid} disappeared while polling"
+                    ));
+                }
+                Err(e) => {
+                    consecutive_errors += 1;
+                    if consecutive_errors >= max_consecutive_errors {
+                        return Err(format!(
+                            "upcloud service {uuid} polling gave up after {consecutive_errors} consecutive transport error(s); last error: {e}"
+                        ));
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(format!(
+                            "upcloud service {uuid} polling timed out after {}s; last error: {e}",
+                            POLL_TIMEOUT.as_secs()
+                        ));
+                    }
+                }
             }
             sleep(POLL_INTERVAL);
         }
@@ -158,7 +194,11 @@ impl ResourceType for UpCloudManagedObjectStorageResource {
             .get("configured_status")
             .and_then(|v| v.as_str())
             .unwrap_or("started");
-        let service = self.poll_until_target_state(&uuid, configured_status)?;
+        let service = self.poll_until_target_state(
+            &uuid,
+            configured_status,
+            POLL_MAX_CONSECUTIVE_ERRORS,
+        )?;
         let outputs = extract_outputs(&service, inputs.get("force_destroy"));
         Ok(OperationResult::Success { outputs })
     }
@@ -201,7 +241,11 @@ impl ResourceType for UpCloudManagedObjectStorageResource {
             .get("configured_status")
             .and_then(|v| v.as_str())
             .unwrap_or("started");
-        let service = self.poll_until_target_state(&uuid, configured_status)?;
+        let service = self.poll_until_target_state(
+            &uuid,
+            configured_status,
+            POLL_MAX_CONSECUTIVE_ERRORS,
+        )?;
         let outputs = extract_outputs(&service, new_inputs.get("force_destroy"));
         Ok(OperationResult::Success { outputs })
     }
