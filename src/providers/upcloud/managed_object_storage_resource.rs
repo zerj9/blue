@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Value, json};
 
 use crate::provider::{OperationCtx, ResourceType};
+use crate::resolvable::Resolvable;
 use crate::types::{OperationResult, Schema};
 
 use super::client::UpCloudClient;
@@ -105,6 +106,59 @@ impl UpCloudManagedObjectStorageResource {
             .read_json()
             .map_err(|e| format!("upcloud GET {path} response parse failed: {e}"))?;
         Ok(Some(service))
+    }
+
+    /// Poll the service until GET returns 404 (truly gone), or `POLL_TIMEOUT`
+    /// elapses. Used by `delete` after the DELETE call returns success —
+    /// UpCloud's DELETE acknowledges intent immediately (204 No Content) but
+    /// the actual teardown is asynchronous, and the service name remains
+    /// reserved during that window. Without polling, an immediate
+    /// recreate-with-same-name (rename + replace flows) hits
+    /// `400 Duplicate service name`.
+    ///
+    /// Same transient-error tolerance as `poll_until_target_state`: up to
+    /// `POLL_MAX_CONSECUTIVE_ERRORS` consecutive transport failures are
+    /// absorbed before bailing out.
+    fn poll_until_gone(
+        &self,
+        uuid: &str,
+        max_consecutive_errors: u32,
+    ) -> Result<(), String> {
+        let deadline = Instant::now() + POLL_TIMEOUT;
+        let mut consecutive_errors: u32 = 0;
+        loop {
+            match self.get_service(uuid) {
+                Ok(None) => return Ok(()),
+                Ok(Some(service)) => {
+                    consecutive_errors = 0;
+                    if Instant::now() >= deadline {
+                        let state = service
+                            .get("operational_state")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        return Err(format!(
+                            "upcloud service {uuid} did not finish deleting within {}s; last operational_state was '{state}'",
+                            POLL_TIMEOUT.as_secs()
+                        ));
+                    }
+                }
+                Err(e) => {
+                    consecutive_errors += 1;
+                    if consecutive_errors >= max_consecutive_errors {
+                        return Err(format!(
+                            "upcloud service {uuid} delete-poll gave up after {consecutive_errors} consecutive transport error(s); last error: {e}"
+                        ));
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(format!(
+                            "upcloud service {uuid} delete-poll timed out after {}s; last error: {e}",
+                            POLL_TIMEOUT.as_secs()
+                        ));
+                    }
+                }
+            }
+            sleep(POLL_INTERVAL);
+        }
     }
 
     /// Poll the service until `operational_state` matches the target derived
@@ -223,6 +277,7 @@ impl ResourceType for UpCloudManagedObjectStorageResource {
     fn update(
         &self,
         _ctx: &dyn OperationCtx,
+        old_inputs: &Value,
         old_outputs: &Value,
         new_inputs: Value,
     ) -> Result<OperationResult, String> {
@@ -233,6 +288,24 @@ impl ResourceType for UpCloudManagedObjectStorageResource {
                 "upcloud.managed_object_storage update: missing 'uuid' in old outputs".to_string()
             })?
             .to_string();
+
+        // Short-circuit when only `force_destroy` (Blue-side) differs:
+        // skip the no-op PATCH and the post-PATCH poll, just update the
+        // mirrored output value.
+        if only_force_destroy_differs(old_inputs, &new_inputs) {
+            let mut outputs = old_outputs.clone();
+            if let Some(obj) = outputs.as_object_mut() {
+                obj.insert(
+                    "force_destroy".to_string(),
+                    new_inputs
+                        .get("force_destroy")
+                        .cloned()
+                        .unwrap_or(Value::Bool(false)),
+                );
+            }
+            return Ok(OperationResult::Success { outputs });
+        }
+
         self.modify_service(&uuid, &new_inputs)?;
 
         // Poll on update too: a configured_status flip needs to settle before
@@ -283,7 +356,7 @@ impl ResourceType for UpCloudManagedObjectStorageResource {
         let mut resp = self.client.delete(&path)?;
         let status = resp.status().as_u16();
 
-        // 404 = already gone; treat as idempotent success.
+        // 404 = already gone; treat as idempotent success. No need to poll.
         if status == 404 {
             return Ok(OperationResult::Success { outputs: json!({}) });
         }
@@ -293,10 +366,22 @@ impl ResourceType for UpCloudManagedObjectStorageResource {
                 "upcloud DELETE {path} failed: http status: {status}: {err_body}"
             ));
         }
+
+        // DELETE returns 204 immediately, but UpCloud tears down the service
+        // asynchronously and keeps the name reserved during teardown. Poll
+        // until GET returns 404 so a recreate with the same name (rename +
+        // replace flows) doesn't hit `400 Duplicate service name`.
+        self.poll_until_gone(uuid, POLL_MAX_CONSECUTIVE_ERRORS)?;
+
         Ok(OperationResult::Success { outputs: json!({}) })
     }
 
-    fn validate(&self, inputs: &Value) -> Result<(), String> {
+    fn validate(&self, inputs: &Resolvable) -> Result<(), String> {
+        // Only validate when fully concrete — pending refs get re-checked
+        // at deploy time after strict resolution.
+        let Some(inputs) = inputs.as_concrete() else {
+            return Ok(());
+        };
         // Catch bad enum values at plan time. UpCloud will also validate, but
         // the field has only two valid values and we use it to pick a polling
         // target — better to fail fast.
@@ -312,6 +397,21 @@ impl ResourceType for UpCloudManagedObjectStorageResource {
         }
         Ok(())
     }
+}
+
+/// True iff `old` and `new` differ only in their `force_destroy` field
+/// (the sole Blue-side input on this resource). Used by `update` to
+/// short-circuit no-op PATCHes when the user toggles `force_destroy`.
+fn only_force_destroy_differs(old: &Value, new: &Value) -> bool {
+    let mut o = old.clone();
+    let mut n = new.clone();
+    if let Some(obj) = o.as_object_mut() {
+        obj.remove("force_destroy");
+    }
+    if let Some(obj) = n.as_object_mut() {
+        obj.remove("force_destroy");
+    }
+    o == n
 }
 
 /// Map a `configured_status` to the `operational_state` we expect to see once

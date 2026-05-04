@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use crate::provider::{DataSourceType, OperationCtx, ProviderInstance, Providers, ResourceType};
+use crate::resolvable::Resolvable;
 use crate::types::{Action, Diff, OperationResult, Schema};
 
 use runtime::ScriptRuntime;
@@ -116,6 +117,7 @@ impl ResourceType for ScriptResource {
     fn update(
         &self,
         _ctx: &dyn OperationCtx,
+        _old_inputs: &Value,
         old_outputs: &Value,
         _new_inputs: Value,
     ) -> Result<OperationResult, String> {
@@ -133,13 +135,21 @@ impl ResourceType for ScriptResource {
     fn customize_diff(
         &self,
         diff: &mut Diff,
-        inputs: &Value,
+        inputs: &Resolvable,
         outputs: &Value,
     ) -> Result<(), String> {
         // If already creating or deleting, nothing to customize
         if diff.action == Action::Create || diff.action == Action::Delete {
             return Ok(());
         }
+
+        // Only inspect inputs when fully concrete — pending refs to
+        // not-yet-deployed resources mean we can't read the script path
+        // yet. Deploy-time re-resolution will run customize_diff again
+        // (via the same path) once inputs are concrete.
+        let Some(inputs) = inputs.as_concrete() else {
+            return Ok(());
+        };
 
         // Check if the script file contents have changed since last deploy
         let Some(script) = inputs.get("script").and_then(|v| v.as_str()) else {

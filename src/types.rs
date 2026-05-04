@@ -3,7 +3,7 @@ use serde_json::Value;
 
 // --- Schema types ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FieldType {
     String,
@@ -105,4 +105,19 @@ pub struct Diff {
     pub action: Action,
     pub changes: Vec<InputChange>,
     pub requires_stop: bool,
+    /// Output paths that this resource's planned action will recompute.
+    /// Set by the provider's `customize_diff` to override the default
+    /// optimistic carry-through of state outputs to downstream resolution
+    /// — e.g., "this Update is changing `networks`, so `endpoints` will
+    /// be recomputed; downstream refs to `endpoints` should remain pending
+    /// at plan time and re-resolve at deploy time."
+    ///
+    /// Default empty: by default, every output of an Updating resource
+    /// flows to downstream's plan-time resolution (matching Terraform's
+    /// optimistic default). Providers opt OUT specific outputs here.
+    /// Replace/Create/Delete actions clear all outputs regardless of this
+    /// field (those actions are recomputing/destroying everything by
+    /// definition).
+    #[serde(default)]
+    pub recomputed_outputs: Vec<String>,
 }

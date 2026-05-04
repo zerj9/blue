@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::provider::{OperationCtx, ResourceType};
+use crate::resolvable::Resolvable;
 use crate::types::{OperationResult, Schema};
 
 use super::client::UpCloudClient;
@@ -133,6 +134,7 @@ impl ResourceType for UpCloudStorageResource {
     fn update(
         &self,
         _ctx: &dyn OperationCtx,
+        _old_inputs: &Value,
         old_outputs: &Value,
         new_inputs: Value,
     ) -> Result<OperationResult, String> {
@@ -175,7 +177,13 @@ impl ResourceType for UpCloudStorageResource {
         Ok(OperationResult::Success { outputs: json!({}) })
     }
 
-    fn validate(&self, inputs: &Value) -> Result<(), String> {
+    fn validate(&self, inputs: &Resolvable) -> Result<(), String> {
+        // Only validate when the resolved input is fully concrete — pending
+        // refs (e.g. `delete_backups = "{{ ... }}"`) get re-checked at deploy
+        // time after strict resolution.
+        let Some(inputs) = inputs.as_concrete() else {
+            return Ok(());
+        };
         // Catch bad `delete_backups` values at plan time. This is the only
         // input we actually consume directly (it lands in a URL query
         // parameter); other field values are validated by UpCloud at API time.

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::resolvable::Resolvable;
 use crate::types::{Diff, OperationResult, Schema};
 
 pub trait OperationCtx {
@@ -10,7 +11,25 @@ pub trait OperationCtx {
 
 pub trait ResourceType {
     fn schema(&self) -> &Schema;
-    fn validate(&self, _inputs: &Value) -> Result<(), String> {
+
+    /// Plan-time validation of resolved inputs. Receives a `Resolvable` so
+    /// providers can decide how to handle partially-resolved inputs (those
+    /// containing `{{ }}` refs to not-yet-deployed resources).
+    ///
+    /// Common pattern for providers that only validate fully concrete
+    /// inputs:
+    ///
+    /// ```ignore
+    /// fn validate(&self, inputs: &Resolvable) -> Result<(), String> {
+    ///     let Some(inputs) = inputs.as_concrete() else { return Ok(()) };
+    ///     // ...existing concrete-Value validation
+    /// }
+    /// ```
+    ///
+    /// Providers wanting plan-time checks on pending values can match on
+    /// the variants directly. Validation runs again at deploy time after
+    /// strict re-resolution, when `inputs` is guaranteed concrete.
+    fn validate(&self, _inputs: &Resolvable) -> Result<(), String> {
         Ok(())
     }
     fn create(&self, ctx: &dyn OperationCtx, inputs: Value) -> Result<OperationResult, String>;
@@ -18,14 +37,20 @@ pub trait ResourceType {
     fn update(
         &self,
         ctx: &dyn OperationCtx,
+        old_inputs: &Value,
         old_outputs: &Value,
         new_inputs: Value,
     ) -> Result<OperationResult, String>;
     fn delete(&self, ctx: &dyn OperationCtx, outputs: &Value) -> Result<OperationResult, String>;
+
+    /// Plan-time hook to customize the computed diff (e.g. promote an
+    /// Update to a Replace based on field-level rules). Same `Resolvable`
+    /// rationale as `validate` — providers choose how to handle pending
+    /// inputs via the same `as_concrete()` early-return pattern.
     fn customize_diff(
         &self,
         _diff: &mut Diff,
-        _inputs: &Value,
+        _inputs: &Resolvable,
         _outputs: &Value,
     ) -> Result<(), String> {
         Ok(())

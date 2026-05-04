@@ -6,6 +6,7 @@ mod plan;
 mod provider;
 mod providers;
 mod refresh;
+mod resolvable;
 mod schema;
 mod state;
 mod template;

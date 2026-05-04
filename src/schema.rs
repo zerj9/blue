@@ -243,6 +243,145 @@ fn validate_field(value: &JsonValue, field: &FieldDef, path: &str) -> Result<(),
     Ok(())
 }
 
+// === Validation against a Resolvable (validate-with-holes) ===
+//
+// Same shape as `validate_inputs` but works on a `Resolvable`. Concrete
+// (`Known`) leaves are validated by the existing Value-based validator.
+// Pending (`Unknown`) leaves are checked against their `expected_type`
+// (computed by the resolver from the destination schema) — type
+// mismatches between upstream output type and downstream input type are
+// caught at plan time, even when the value isn't yet known.
+//
+// Required-field checks treat `Unknown` as "present" — the value will
+// arrive at deploy time. Compositional `Object`/`Array` variants recurse.
+
+use crate::resolvable::Resolvable;
+
+pub fn validate_resolvable(schema: &[FieldDef], value: &Resolvable) -> Result<(), String> {
+    validate_resolvable_object_against_fields(value, schema, "")
+}
+
+fn validate_resolvable_object_against_fields(
+    value: &Resolvable,
+    fields: &[FieldDef],
+    path: &str,
+) -> Result<(), String> {
+    match value {
+        // Concrete subtree — fall through to the existing Value-based
+        // validator. All the existing rules (required, unknown keys,
+        // nested types) apply unchanged.
+        Resolvable::Known(v) => validate_object_against_fields(v, fields, path),
+
+        Resolvable::Object(map) => {
+            // Required-field check: Unknown counts as present (the value
+            // will be filled in at deploy time).
+            for field in fields {
+                if field.required && !map.contains_key(&field.path) {
+                    return Err(format!(
+                        "missing required field '{}'",
+                        qualify(path, &field.path)
+                    ));
+                }
+            }
+            for (key, val) in map {
+                match fields.iter().find(|f| f.path == *key) {
+                    None => return Err(format!("unknown field '{}'", qualify(path, key))),
+                    Some(def) => validate_resolvable_field(val, def, &qualify(path, key))?,
+                }
+            }
+            Ok(())
+        }
+
+        // The whole object is a pending ref. Type-check expected_type
+        // against Object; we can't enumerate keys to check required
+        // fields, so we trust the destination schema and let deploy-time
+        // re-validation catch any structural problems.
+        Resolvable::Unknown { expected_type, .. } => match expected_type {
+            None | Some(FieldType::Object) => Ok(()),
+            Some(other) => Err(format!(
+                "expected object at {}, got pending value of type {}",
+                display_path(path),
+                field_type_name(other)
+            )),
+        },
+
+        Resolvable::Array(_) => Err(format!(
+            "expected object at {}, got array",
+            display_path(path)
+        )),
+    }
+}
+
+fn validate_resolvable_field(
+    value: &Resolvable,
+    field: &FieldDef,
+    path: &str,
+) -> Result<(), String> {
+    match value {
+        Resolvable::Known(v) => validate_field(v, field, path),
+
+        Resolvable::Unknown { expected_type, .. } => {
+            // Permissive context (None) accepts any destination type.
+            // Otherwise check the upstream's declared output type matches
+            // the destination's declared input type.
+            match expected_type {
+                None => Ok(()),
+                Some(t) if field_types_compatible(t, &field.field_type) => Ok(()),
+                Some(t) => Err(format!(
+                    "field '{}' expected {}, got pending value of type {}",
+                    path,
+                    field_type_name(&field.field_type),
+                    field_type_name(t),
+                )),
+            }
+        }
+
+        Resolvable::Object(_) => {
+            if !matches!(field.field_type, FieldType::Object) {
+                return Err(format!(
+                    "field '{}' expected {}, got object",
+                    path,
+                    field_type_name(&field.field_type)
+                ));
+            }
+            if !field.fields.is_empty() {
+                validate_resolvable_object_against_fields(value, &field.fields, path)
+            } else {
+                // Permissive object — nothing further to enforce.
+                Ok(())
+            }
+        }
+
+        Resolvable::Array(arr) => {
+            if !matches!(field.field_type, FieldType::Array) {
+                return Err(format!(
+                    "field '{}' expected {}, got array",
+                    path,
+                    field_type_name(&field.field_type)
+                ));
+            }
+            if field.items.is_empty() {
+                return Ok(());
+            }
+            for (i, item) in arr.iter().enumerate() {
+                let item_path = format!("{path}.{i}");
+                if field.items.len() == 1 && field.items[0].path.is_empty() {
+                    validate_resolvable_field(item, &field.items[0], &item_path)?;
+                } else {
+                    validate_resolvable_object_against_fields(item, &field.items, &item_path)?;
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Whether an upstream output type is compatible with a downstream input
+/// type. v1: exact equality. Future could add coercion (e.g. number → string).
+fn field_types_compatible(upstream: &FieldType, downstream: &FieldType) -> bool {
+    upstream == downstream
+}
+
 fn type_matches(value: &JsonValue, expected: &FieldType) -> bool {
     match expected {
         FieldType::String => value.is_string(),
@@ -786,5 +925,207 @@ default = "no"
         let result = apply_defaults(&inputs, json!({}));
         assert_eq!(result["tier"], "hdd");
         assert_eq!(result["encrypted"], "no");
+    }
+
+    // === validate_resolvable tests ===
+
+    use crate::resolvable::{Resolvable, resolve_inputs};
+    use std::collections::HashMap;
+
+    #[test]
+    fn validate_resolvable_passes_on_concrete_inputs() {
+        let inputs = schema_for(
+            r#"
+[inputs.name]
+type = "string"
+required = true
+
+[inputs.size]
+type = "number"
+"#,
+        );
+        let value = Resolvable::known(json!({"name": "data", "size": 100}));
+        validate_resolvable(&inputs, &value).unwrap();
+    }
+
+    #[test]
+    fn validate_resolvable_catches_missing_required_in_concrete() {
+        let inputs = schema_for(
+            r#"
+[inputs.name]
+type = "string"
+required = true
+"#,
+        );
+        let value = Resolvable::known(json!({}));
+        let err = validate_resolvable(&inputs, &value).unwrap_err();
+        assert!(err.contains("missing required field 'name'"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_resolvable_treats_unknown_as_present_for_required_check() {
+        // service_uuid is required and pending — counts as present.
+        let inputs = schema_for(
+            r#"
+[inputs.service_uuid]
+type = "string"
+required = true
+"#,
+        );
+        let template_inputs = json!({"service_uuid": "{{ resources.svc.uuid }}"});
+        let resolved = resolve_inputs(&template_inputs, &inputs, &HashMap::new()).unwrap();
+        validate_resolvable(&inputs, &resolved).unwrap();
+    }
+
+    #[test]
+    fn validate_resolvable_catches_missing_required_when_object_partial() {
+        // Object has one Unknown field but the other required field is
+        // genuinely missing.
+        let inputs = schema_for(
+            r#"
+[inputs.name]
+type = "string"
+required = true
+
+[inputs.service_uuid]
+type = "string"
+required = true
+"#,
+        );
+        let template_inputs = json!({"service_uuid": "{{ resources.svc.uuid }}"});
+        let resolved = resolve_inputs(&template_inputs, &inputs, &HashMap::new()).unwrap();
+        let err = validate_resolvable(&inputs, &resolved).unwrap_err();
+        assert!(err.contains("missing required field 'name'"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_resolvable_catches_unknown_field_in_partial_object() {
+        let inputs = schema_for(
+            r#"
+[inputs.name]
+type = "string"
+"#,
+        );
+        let template_inputs = json!({
+            "name": "ok",
+            "typo": "{{ resources.svc.uuid }}",
+        });
+        let resolved = resolve_inputs(&template_inputs, &inputs, &HashMap::new()).unwrap();
+        let err = validate_resolvable(&inputs, &resolved).unwrap_err();
+        assert!(err.contains("unknown field 'typo'"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_resolvable_catches_type_mismatch_on_pending_leaf() {
+        // Schema wants a number, ref's expected_type (from the upstream
+        // it points at) would be a string. We don't actually consult the
+        // upstream's output schema here — the resolver records the
+        // *destination* expected_type. So this test is constructed to
+        // ensure the destination check itself works: an Unknown that
+        // claims expected_type=String but lives in a number-typed slot.
+        let inputs = schema_for(
+            r#"
+[inputs.size]
+type = "number"
+"#,
+        );
+        // Build a Resolvable manually that simulates "schema says number,
+        // pending leaf claims string" — this is what would happen if the
+        // resolver were called with a permissive parent's view. In normal
+        // resolver usage the Unknown would carry expected_type=Some(Number)
+        // because the destination IS Number, so this asserts the check
+        // catches a divergence.
+        let bad_unknown = Resolvable::unknown(
+            "{{ resources.svc.name }}".to_string(),
+            crate::template::extract_refs("{{ resources.svc.name }}").unwrap(),
+            Some(FieldType::String),
+        );
+        let mut map = std::collections::BTreeMap::new();
+        map.insert("size".to_string(), bad_unknown);
+        let value = Resolvable::Object(map);
+        let err = validate_resolvable(&inputs, &value).unwrap_err();
+        assert!(err.contains("expected number"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_resolvable_permissive_context_accepts_any_pending_type() {
+        let inputs = schema_for(
+            r#"
+[inputs.payload]
+type = "object"
+"#,
+        );
+        let template_inputs = json!({
+            "payload": {"any_key": "{{ resources.svc.uuid }}"}
+        });
+        let resolved = resolve_inputs(&template_inputs, &inputs, &HashMap::new()).unwrap();
+        // payload is permissive (no declared fields), so the nested
+        // pending leaf carries expected_type=None — accepted.
+        validate_resolvable(&inputs, &resolved).unwrap();
+    }
+
+    #[test]
+    fn validate_resolvable_walks_into_array_elements() {
+        let inputs = schema_for(
+            r#"
+[inputs.tags]
+type = "array"
+items = { type = "string" }
+"#,
+        );
+        let template_inputs = json!({"tags": ["a", "{{ resources.x.label }}"]});
+        let resolved = resolve_inputs(&template_inputs, &inputs, &HashMap::new()).unwrap();
+        validate_resolvable(&inputs, &resolved).unwrap();
+    }
+
+    #[test]
+    fn validate_resolvable_recurses_into_typed_object_array() {
+        let inputs = schema_for(
+            r#"
+[inputs.networks]
+type = "array"
+
+[inputs.networks.items.name]
+type = "string"
+required = true
+
+[inputs.networks.items.uuid]
+type = "string"
+"#,
+        );
+        let template_inputs = json!({
+            "networks": [
+                {"name": "ok", "uuid": "{{ resources.svc.uuid }}"},
+            ]
+        });
+        let resolved = resolve_inputs(&template_inputs, &inputs, &HashMap::new()).unwrap();
+        validate_resolvable(&inputs, &resolved).unwrap();
+    }
+
+    #[test]
+    fn validate_resolvable_rejects_pending_object_in_string_slot() {
+        let inputs = schema_for(
+            r#"
+[inputs.name]
+type = "string"
+"#,
+        );
+        // Manually construct a pending Object in a String slot (would
+        // happen if a user wrote a nested object literal where a string
+        // is expected).
+        let mut nested = std::collections::BTreeMap::new();
+        nested.insert(
+            "x".to_string(),
+            Resolvable::unknown(
+                "{{ resources.svc.uuid }}".to_string(),
+                crate::template::extract_refs("{{ resources.svc.uuid }}").unwrap(),
+                None,
+            ),
+        );
+        let mut root = std::collections::BTreeMap::new();
+        root.insert("name".to_string(), Resolvable::Object(nested));
+        let value = Resolvable::Object(root);
+        let err = validate_resolvable(&inputs, &value).unwrap_err();
+        assert!(err.contains("expected string"), "got: {err}");
     }
 }

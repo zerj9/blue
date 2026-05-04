@@ -1,0 +1,29 @@
+section = "Managed Object Storage"
+
+[inputs.service_uuid]
+type = "string"
+required = true
+force_new = true
+description = "UUID of the parent upcloud.managed_object_storage service. Typically wired from {{ resources.<service>.uuid }}. Cannot be changed — buckets cannot be moved between services."
+
+[inputs.name]
+type = "string"
+required = true
+force_new = true
+description = "Bucket name. 1-254 characters from [a-zA-Z0-9._-]. Must be unique within the parent service. Cannot be renamed."
+
+[outputs.name]
+type = "string"
+description = "Bucket name."
+
+[outputs.service_uuid]
+type = "string"
+description = "UUID of the parent service. Mirrored from inputs so it is available at destroy time."
+
+[outputs.total_objects]
+type = "number"
+description = "Number of objects currently stored in the bucket. Refreshed on read."
+
+[outputs.total_size_bytes]
+type = "number"
+description = "Total size of all objects in the bucket, in bytes. Refreshed on read."

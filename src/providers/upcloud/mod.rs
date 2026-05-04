@@ -1,4 +1,5 @@
 pub mod client;
+pub mod managed_object_storage_bucket_resource;
 pub mod managed_object_storage_resource;
 pub mod storage_data_source;
 pub mod storage_resource;
@@ -14,6 +15,7 @@ use crate::config::ProviderDef;
 use crate::provider::{DataSourceType, ProviderInstance, Providers, ResourceType};
 
 use client::UpCloudClient;
+use managed_object_storage_bucket_resource::UpCloudManagedObjectStorageBucketResource;
 use managed_object_storage_resource::UpCloudManagedObjectStorageResource;
 use storage_data_source::UpCloudStorageDataSource;
 use storage_resource::UpCloudStorageResource;
@@ -22,6 +24,7 @@ pub struct UpCloudProvider {
     storage_data_source: UpCloudStorageDataSource,
     storage_resource: UpCloudStorageResource,
     managed_object_storage_resource: UpCloudManagedObjectStorageResource,
+    managed_object_storage_bucket_resource: UpCloudManagedObjectStorageBucketResource,
 }
 
 impl ProviderInstance for UpCloudProvider {
@@ -29,6 +32,7 @@ impl ProviderInstance for UpCloudProvider {
         match name {
             "storage" => Some(&self.storage_resource),
             "managed_object_storage" => Some(&self.managed_object_storage_resource),
+            "managed_object_storage_bucket" => Some(&self.managed_object_storage_bucket_resource),
             _ => None,
         }
     }
@@ -111,13 +115,16 @@ pub fn register(
     let storage_data_source = UpCloudStorageDataSource::new(Arc::clone(&client));
     let storage_resource = UpCloudStorageResource::new(Arc::clone(&client));
     let managed_object_storage_resource =
-        UpCloudManagedObjectStorageResource::new(client);
+        UpCloudManagedObjectStorageResource::new(Arc::clone(&client));
+    let managed_object_storage_bucket_resource =
+        UpCloudManagedObjectStorageBucketResource::new(client);
     providers.register(
         instance_name,
         Box::new(UpCloudProvider {
             storage_data_source,
             storage_resource,
             managed_object_storage_resource,
+            managed_object_storage_bucket_resource,
         }),
     );
     Ok(())
