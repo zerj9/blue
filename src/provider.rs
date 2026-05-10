@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::resolvable::Resolvable;
+use crate::state::SchemaResolver;
 use crate::types::{Diff, OperationResult, Schema};
 
 pub trait OperationCtx {
@@ -92,5 +93,11 @@ impl Providers {
     pub fn data_source_type(&self, type_str: &str) -> Option<&dyn DataSourceType> {
         let (provider, name) = type_str.split_once('.')?;
         self.instances.get(provider)?.data_source_type(name)
+    }
+}
+
+impl SchemaResolver for Providers {
+    fn schema(&self, type_name: &str) -> Option<&Schema> {
+        self.resource_type(type_name).map(|rt| rt.schema())
     }
 }

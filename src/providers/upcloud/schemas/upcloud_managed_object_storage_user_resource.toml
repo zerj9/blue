@@ -1,0 +1,29 @@
+section = "Managed Object Storage"
+
+[inputs.service_uuid]
+type = "string"
+required = true
+force_new = true
+description = "UUID of the parent upcloud.managed_object_storage service. Typically referenced from a parent service resource's `uuid` output. Cannot be changed — users cannot be moved between services."
+
+[inputs.username]
+type = "string"
+required = true
+force_new = true
+description = "Username for the service user. 1-64 characters from [\\w+=,.@-]+ (alphanumerics, underscore, '+', '=', ',', '.', '@', '-'). Must be unique within the parent service. Cannot be renamed. The literal '_upcloud-internal-user' is reserved by UpCloud and rejected."
+
+[outputs.username]
+type = "string"
+description = "Service user name."
+
+[outputs.service_uuid]
+type = "string"
+description = "UUID of the parent service. Mirrored from inputs so it is available at destroy time."
+
+[outputs.arn]
+type = "string"
+description = "Amazon-style resource name for the user (e.g. `urn:ecs:iam::ACCOUNT:user/USERNAME`). Populated on read; the create response does not include it."
+
+[outputs.created_at]
+type = "string"
+description = "ISO 8601 creation timestamp."

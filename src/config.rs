@@ -76,6 +76,17 @@ pub fn parse_resource_config(toml_str: &str) -> Result<ResourceConfig, String> {
     toml::from_str(toml_str).map_err(|e| format!("Failed to parse resource config: {e}"))
 }
 
+/// Validate the `[encryption]` block in a parsed config: each recipient
+/// string must be a parseable age X25519 recipient (`age1...`). Run this
+/// at startup, immediately after `parse_resource_config`, so a typo in a
+/// recipient surfaces with a clear error before any state read.
+pub fn validate_encryption(config: &ResourceConfig) -> Result<(), String> {
+    let Some(enc) = config.encryption.as_ref() else {
+        return Ok(());
+    };
+    crate::crypto::parse_recipients(&enc.recipients).map(|_| ())
+}
+
 pub fn parse_provider_config(toml_str: &str) -> Result<ProviderFile, String> {
     let table: toml::Table =
         toml::from_str(toml_str).map_err(|e| format!("Failed to parse provider config: {e}"))?;
@@ -223,6 +234,60 @@ password = "{{ data.vault_creds.password }}"
         assert_eq!(
             config.providers["upcloud"].config["username"],
             Value::String("{{ data.vault_creds.username }}".into())
+        );
+    }
+
+    #[test]
+    fn validate_encryption_accepts_missing_block() {
+        let toml = r#"
+[parameters.foo]
+default = "bar"
+"#;
+        let config = parse_resource_config(toml).unwrap();
+        validate_encryption(&config).unwrap();
+    }
+
+    #[test]
+    fn validate_encryption_accepts_empty_recipients() {
+        let toml = r#"
+[encryption]
+recipients = []
+"#;
+        let config = parse_resource_config(toml).unwrap();
+        validate_encryption(&config).unwrap();
+    }
+
+    #[test]
+    fn validate_encryption_accepts_valid_x25519_recipient() {
+        // Generate a real X25519 recipient at test time so we don't bake
+        // a key into the source.
+        let id = age::x25519::Identity::generate();
+        let pubkey = id.to_public().to_string();
+        let toml = format!(
+            r#"
+[encryption]
+recipients = ["{pubkey}"]
+"#
+        );
+        let config = parse_resource_config(&toml).unwrap();
+        validate_encryption(&config).unwrap();
+    }
+
+    #[test]
+    fn validate_encryption_rejects_invalid_recipient() {
+        let toml = r#"
+[encryption]
+recipients = ["age1notreal"]
+"#;
+        let config = parse_resource_config(toml).unwrap();
+        let err = validate_encryption(&config).unwrap_err();
+        assert!(
+            err.contains("age1notreal"),
+            "error should name the bad recipient: {err}"
+        );
+        assert!(
+            err.contains("invalid recipient"),
+            "error should mark this as a recipient problem: {err}"
         );
     }
 }

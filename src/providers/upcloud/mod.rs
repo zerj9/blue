@@ -1,6 +1,9 @@
 pub mod client;
 pub mod managed_object_storage_bucket_resource;
 pub mod managed_object_storage_resource;
+pub mod managed_object_storage_user_access_key_resource;
+pub mod managed_object_storage_user_policy_resource;
+pub mod managed_object_storage_user_resource;
 pub mod storage_data_source;
 pub mod storage_resource;
 
@@ -17,6 +20,9 @@ use crate::provider::{DataSourceType, ProviderInstance, Providers, ResourceType}
 use client::UpCloudClient;
 use managed_object_storage_bucket_resource::UpCloudManagedObjectStorageBucketResource;
 use managed_object_storage_resource::UpCloudManagedObjectStorageResource;
+use managed_object_storage_user_access_key_resource::UpCloudManagedObjectStorageUserAccessKeyResource;
+use managed_object_storage_user_policy_resource::UpCloudManagedObjectStorageUserPolicyResource;
+use managed_object_storage_user_resource::UpCloudManagedObjectStorageUserResource;
 use storage_data_source::UpCloudStorageDataSource;
 use storage_resource::UpCloudStorageResource;
 
@@ -25,6 +31,10 @@ pub struct UpCloudProvider {
     storage_resource: UpCloudStorageResource,
     managed_object_storage_resource: UpCloudManagedObjectStorageResource,
     managed_object_storage_bucket_resource: UpCloudManagedObjectStorageBucketResource,
+    managed_object_storage_user_resource: UpCloudManagedObjectStorageUserResource,
+    managed_object_storage_user_access_key_resource:
+        UpCloudManagedObjectStorageUserAccessKeyResource,
+    managed_object_storage_user_policy_resource: UpCloudManagedObjectStorageUserPolicyResource,
 }
 
 impl ProviderInstance for UpCloudProvider {
@@ -33,6 +43,13 @@ impl ProviderInstance for UpCloudProvider {
             "storage" => Some(&self.storage_resource),
             "managed_object_storage" => Some(&self.managed_object_storage_resource),
             "managed_object_storage_bucket" => Some(&self.managed_object_storage_bucket_resource),
+            "managed_object_storage_user" => Some(&self.managed_object_storage_user_resource),
+            "managed_object_storage_user_access_key" => {
+                Some(&self.managed_object_storage_user_access_key_resource)
+            }
+            "managed_object_storage_user_policy" => {
+                Some(&self.managed_object_storage_user_policy_resource)
+            }
             _ => None,
         }
     }
@@ -117,7 +134,13 @@ pub fn register(
     let managed_object_storage_resource =
         UpCloudManagedObjectStorageResource::new(Arc::clone(&client));
     let managed_object_storage_bucket_resource =
-        UpCloudManagedObjectStorageBucketResource::new(client);
+        UpCloudManagedObjectStorageBucketResource::new(Arc::clone(&client));
+    let managed_object_storage_user_resource =
+        UpCloudManagedObjectStorageUserResource::new(Arc::clone(&client));
+    let managed_object_storage_user_access_key_resource =
+        UpCloudManagedObjectStorageUserAccessKeyResource::new(Arc::clone(&client));
+    let managed_object_storage_user_policy_resource =
+        UpCloudManagedObjectStorageUserPolicyResource::new(client);
     providers.register(
         instance_name,
         Box::new(UpCloudProvider {
@@ -125,6 +148,9 @@ pub fn register(
             storage_resource,
             managed_object_storage_resource,
             managed_object_storage_bucket_resource,
+            managed_object_storage_user_resource,
+            managed_object_storage_user_access_key_resource,
+            managed_object_storage_user_policy_resource,
         }),
     );
     Ok(())

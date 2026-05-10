@@ -4,7 +4,7 @@ section = "Managed Object Storage"
 type = "string"
 required = true
 force_new = true
-description = "UUID of the parent upcloud.managed_object_storage service. Typically wired from {{ resources.<service>.uuid }}. Cannot be changed — buckets cannot be moved between services."
+description = "UUID of the parent upcloud.managed_object_storage service. Typically referenced from a parent service resource's `uuid` output. Cannot be changed — buckets cannot be moved between services."
 
 [inputs.name]
 type = "string"

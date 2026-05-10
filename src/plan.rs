@@ -44,6 +44,11 @@ pub fn create_plan(
     providers: &Providers,
     params: &HashMap<String, Value>,
 ) -> Result<Plan, String> {
+    // Refuse to plan if any resource type in the config has secret outputs
+    // but [encryption] recipients are absent. Without recipients, those
+    // values would land in state cleartext — fail before any work happens.
+    refuse_if_secrets_without_recipients(config, providers)?;
+
     let graph = Graph::from_config_and_state(config, state)?;
     let order = graph.topological_order();
     let mut output_map: HashMap<String, Value> = HashMap::new();
@@ -348,6 +353,55 @@ fn refs_to_replaced(value: &Value, replaced: &[String]) -> Result<bool, String> 
         }
         _ => Ok(false),
     }
+}
+
+/// Refuse to plan when the config uses any resource type with `secret = true`
+/// outputs but no `[encryption].recipients` are configured. Without
+/// recipients, secret values would be persisted cleartext in state.
+/// Fired before graph building so the user gets the error before any
+/// other plan-time work.
+fn refuse_if_secrets_without_recipients(
+    config: &ResourceConfig,
+    providers: &Providers,
+) -> Result<(), String> {
+    refuse_if_secrets_without_recipients_inner(config, |name| {
+        providers.resource_type(name).map(|rt| rt.schema())
+    })
+}
+
+/// Inner logic, parameterised on schema lookup so tests don't need a
+/// full provider instance to exercise the secret/no-recipients refusal.
+fn refuse_if_secrets_without_recipients_inner<'a, F>(
+    config: &ResourceConfig,
+    schema_for: F,
+) -> Result<(), String>
+where
+    F: Fn(&str) -> Option<&'a crate::types::Schema>,
+{
+    let has_recipients = config
+        .encryption
+        .as_ref()
+        .map(|e| !e.recipients.is_empty())
+        .unwrap_or(false);
+    if has_recipients {
+        return Ok(());
+    }
+    for (name, def) in &config.resources {
+        let Some(schema) = schema_for(&def.resource_type) else {
+            // Unknown resource type — let downstream graph building
+            // produce its own (more specific) error. Don't pre-empt.
+            continue;
+        };
+        if schema.outputs.iter().any(|o| o.secret) {
+            return Err(format!(
+                "resource '{name}' (type '{rt_type}') has secret outputs but no \
+                 [encryption] recipients are configured; add a [encryption] block \
+                 with at least one age recipient before planning",
+                rt_type = def.resource_type
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -956,5 +1010,109 @@ triggers_replace = { key = "value" }
         // known_outputs should also include the Unchanged resource's
         // outputs (so anything depending on it could see them).
         assert!(plan.known_outputs.contains_key("resources.test"));
+    }
+
+    use crate::types::{FieldType, OutputDef, Schema};
+
+    fn schema_with_secret() -> Schema {
+        Schema {
+            inputs: vec![],
+            outputs: vec![OutputDef {
+                path: "secret_field".to_string(),
+                field_type: FieldType::String,
+                secret: true,
+            }],
+            retry: None,
+            timeout: None,
+        }
+    }
+
+    fn schema_without_secret() -> Schema {
+        Schema {
+            inputs: vec![],
+            outputs: vec![OutputDef {
+                path: "public_field".to_string(),
+                field_type: FieldType::String,
+                secret: false,
+            }],
+            retry: None,
+            timeout: None,
+        }
+    }
+
+    #[test]
+    fn refuse_when_secret_resource_used_without_recipients() {
+        let config = parse_resource_config(
+            r#"
+[resources.with_secret]
+type = "test.with_secret"
+"#,
+        )
+        .unwrap();
+        let schema = schema_with_secret();
+        let lookup = |name: &str| {
+            if name == "test.with_secret" { Some(&schema) } else { None }
+        };
+        let err = refuse_if_secrets_without_recipients_inner(&config, lookup).unwrap_err();
+        assert!(err.contains("with_secret"), "got: {err}");
+        assert!(err.contains("[encryption]"), "got: {err}");
+        assert!(err.contains("recipients"), "got: {err}");
+    }
+
+    #[test]
+    fn proceed_when_recipients_configured_even_if_secret_resource_used() {
+        let config = parse_resource_config(
+            r#"
+[encryption]
+recipients = ["age1abc"]
+
+[resources.with_secret]
+type = "test.with_secret"
+"#,
+        )
+        .unwrap();
+        let schema = schema_with_secret();
+        let lookup = |name: &str| {
+            if name == "test.with_secret" { Some(&schema) } else { None }
+        };
+        refuse_if_secrets_without_recipients_inner(&config, lookup).unwrap();
+    }
+
+    #[test]
+    fn proceed_when_no_resource_has_secret_outputs() {
+        let config = parse_resource_config(
+            r#"
+[resources.public]
+type = "test.public"
+"#,
+        )
+        .unwrap();
+        let schema = schema_without_secret();
+        let lookup = |name: &str| {
+            if name == "test.public" { Some(&schema) } else { None }
+        };
+        refuse_if_secrets_without_recipients_inner(&config, lookup).unwrap();
+    }
+
+    #[test]
+    fn refuse_when_recipients_list_is_empty() {
+        // [encryption] block present but recipients = [] should still be
+        // treated as "no recipients" — refuse if any secret resource is used.
+        let config = parse_resource_config(
+            r#"
+[encryption]
+recipients = []
+
+[resources.with_secret]
+type = "test.with_secret"
+"#,
+        )
+        .unwrap();
+        let schema = schema_with_secret();
+        let lookup = |name: &str| {
+            if name == "test.with_secret" { Some(&schema) } else { None }
+        };
+        let err = refuse_if_secrets_without_recipients_inner(&config, lookup).unwrap_err();
+        assert!(err.contains("with_secret"), "got: {err}");
     }
 }

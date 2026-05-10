@@ -2,10 +2,15 @@ use std::path::Path;
 
 use crate::graph::Graph;
 use crate::provider::Providers;
-use crate::state::{State, write_state};
+use crate::state::{State, StateIO, preserve_secret_outputs, write_state};
 use crate::types::OperationResult;
 
-pub fn refresh(state: &mut State, state_path: &Path, providers: &Providers) -> Result<(), String> {
+pub fn refresh(
+    state: &mut State,
+    state_path: &Path,
+    providers: &Providers,
+    io: &StateIO,
+) -> Result<(), String> {
     let graph = Graph::from_state(state)?;
     let order = graph.topological_order();
 
@@ -22,7 +27,13 @@ pub fn refresh(state: &mut State, state_path: &Path, providers: &Providers) -> R
             .ok_or_else(|| format!("Unknown resource type: {}", res_state.resource_type))?;
 
         match res_type.read(&res_state.outputs) {
-            Ok(OperationResult::Success { outputs }) => {
+            Ok(OperationResult::Success { mut outputs }) => {
+                // The provider's read() typically doesn't return write-only
+                // secrets (UpCloud's secret_access_key, OAuth client_secret,
+                // etc.). Carry them forward from the previously stored
+                // outputs so refresh doesn't clobber them with a value
+                // missing from the API response.
+                preserve_secret_outputs(&mut outputs, &res_state.outputs, res_type.schema());
                 state.resources.get_mut(name).unwrap().outputs = outputs;
             }
             Ok(OperationResult::NotFound) => {
@@ -40,11 +51,16 @@ pub fn refresh(state: &mut State, state_path: &Path, providers: &Providers) -> R
         }
     }
 
-    write_state(state_path, state)?;
+    write_state(state_path, state, io)?;
     Ok(())
 }
 
-pub fn destroy(state: &mut State, state_path: &Path, providers: &Providers) -> Result<(), String> {
+pub fn destroy(
+    state: &mut State,
+    state_path: &Path,
+    providers: &Providers,
+    io: &StateIO,
+) -> Result<(), String> {
     let graph = Graph::from_state(state)?;
     let order = graph.reverse_topological_order();
 
@@ -66,20 +82,20 @@ pub fn destroy(state: &mut State, state_path: &Path, providers: &Providers) -> R
         match res_type.delete(&noop_ctx, &res_state.outputs) {
             Ok(OperationResult::Success { .. }) | Ok(OperationResult::NotFound) => {
                 state.resources.remove(name);
-                write_state(state_path, state)?;
+                write_state(state_path, state, io)?;
             }
             Ok(OperationResult::Failed { error, .. }) => {
-                write_state(state_path, state)?;
+                write_state(state_path, state, io)?;
                 return Err(format!("Failed to delete '{name}': {error}"));
             }
             Err(e) => {
-                write_state(state_path, state)?;
+                write_state(state_path, state, io)?;
                 return Err(format!("Error deleting '{name}': {e}"));
             }
         }
     }
 
-    write_state(state_path, state)?;
+    write_state(state_path, state, io)?;
     Ok(())
 }
 
@@ -120,7 +136,7 @@ mod tests {
             },
         );
 
-        refresh(&mut state, Path::new(&path), &providers).unwrap();
+        refresh(&mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
         // Script resource read returns stored outputs unchanged
         assert_eq!(state.resources["test"].outputs["result"], "old");
 
@@ -150,7 +166,7 @@ mod tests {
             },
         );
 
-        destroy(&mut state, Path::new(&path), &providers).unwrap();
+        destroy(&mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
         assert!(state.resources.is_empty());
 
         fs::remove_file(&path).ok();

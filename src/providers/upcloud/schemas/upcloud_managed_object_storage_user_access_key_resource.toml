@@ -1,0 +1,43 @@
+section = "Managed Object Storage"
+
+[inputs.service_uuid]
+type = "string"
+required = true
+force_new = true
+description = "UUID of the parent upcloud.managed_object_storage service. Typically referenced from a parent service resource's `uuid` output. Cannot be changed — access keys cannot be moved between services."
+
+[inputs.username]
+type = "string"
+required = true
+force_new = true
+description = "Service user that owns this access key. Typically referenced from a parent upcloud.managed_object_storage_user resource's `username` output. Cannot be changed — moving a key between users would require minting a new secret."
+
+[inputs.status]
+type = "string"
+default = "Active"
+description = "Whether the key is currently usable. 'Active' allows S3 requests; 'Inactive' rejects them but preserves the key (re-activatable). Modifiable via PATCH; the only updatable field on this resource."
+
+[outputs.service_uuid]
+type = "string"
+description = "UUID of the parent service. Mirrored from inputs."
+
+[outputs.username]
+type = "string"
+description = "Service user that owns this access key. Mirrored from inputs."
+
+[outputs.access_key_id]
+type = "string"
+description = "Public access key identifier (`AKIA...` style). Use as the access-key-id in any S3-compatible client."
+
+[outputs.secret_access_key]
+type = "string"
+secret = true
+description = "Secret access key. Returned by UpCloud only once at create time and never again. Stored encrypted in state under the configured `[encryption].recipients`. Reference from another resource via Blue's template syntax to inject into S3-client configuration."
+
+[outputs.status]
+type = "string"
+description = "Current status reported by UpCloud: 'Active' or 'Inactive'."
+
+[outputs.created_at]
+type = "string"
+description = "ISO 8601 creation timestamp."

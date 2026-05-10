@@ -1,4 +1,5 @@
 mod config;
+mod crypto;
 mod deploy;
 mod diff;
 mod graph;
@@ -67,6 +68,16 @@ enum Command {
         #[arg(long, default_value = "blue.state.json")]
         state: String,
     },
+    /// Re-encrypt secret state values under the [encryption] recipient set
+    /// from the resource config. Run after adding or removing recipients.
+    Rekey {
+        #[arg(short, long)]
+        file: String,
+        #[arg(long, default_value = "providers.toml")]
+        providers: String,
+        #[arg(long, default_value = "blue.state.json")]
+        state: String,
+    },
 }
 
 fn main() {
@@ -89,7 +100,17 @@ fn run(cli: Cli) -> Result<(), String> {
             let config_dir = config_dir_from_file(&file);
             let providers = build_providers(&providers, config_dir)?;
             let config = load_resource_config(&file)?;
-            let state = state::read_state(Path::new(&state))?;
+            config::validate_encryption(&config)?;
+            let identities = crypto::load_identities()?;
+            let recipients_raw = recipients_raw_from_config(&config);
+            let recipients = crypto::parse_recipients(&recipients_raw)?;
+            let io = state::StateIO {
+                recipients: &recipients,
+                identities: &identities,
+                recipients_raw: &recipients_raw,
+                schemas: &providers,
+            };
+            let state = state::read_state(Path::new(&state), &io)?;
             let params = parse_vars(&var, var_file.as_deref())?;
             let plan = plan::create_plan(&config, &state, &providers, &params)?;
             print_plan(&plan);
@@ -105,8 +126,18 @@ fn run(cli: Cli) -> Result<(), String> {
             let config_dir = config_dir_from_file(&file);
             let providers = build_providers(&providers, config_dir)?;
             let config = load_resource_config(&file)?;
+            config::validate_encryption(&config)?;
+            let identities = crypto::load_identities()?;
+            let recipients_raw = recipients_raw_from_config(&config);
+            let recipients = crypto::parse_recipients(&recipients_raw)?;
             let state_path = state;
-            let mut state = state::read_state(Path::new(&state_path))?;
+            let io = state::StateIO {
+                recipients: &recipients,
+                identities: &identities,
+                recipients_raw: &recipients_raw,
+                schemas: &providers,
+            };
+            let mut state = state::read_state(Path::new(&state_path), &io)?;
             let params = parse_vars(&var, var_file.as_deref())?;
             let plan = plan::create_plan(&config, &state, &providers, &params)?;
 
@@ -116,27 +147,125 @@ fn run(cli: Cli) -> Result<(), String> {
             }
 
             print_plan(&plan);
-            deploy::execute_deploy(&plan, &mut state, Path::new(&state_path), &providers)?;
+            deploy::execute_deploy(&plan, &mut state, Path::new(&state_path), &providers, &io)?;
             println!("Deploy complete.");
             Ok(())
         }
         Command::Refresh { providers, state } => {
             let providers = build_providers(&providers, None)?;
             let state_path = state;
-            let mut state = state::read_state(Path::new(&state_path))?;
-            refresh::refresh(&mut state, Path::new(&state_path), &providers)?;
+            // Refresh has no config file (no [encryption] block available),
+            // so the recipient set comes from `state.encrypted_with` —
+            // whatever was used at the previous successful write. Rekey is
+            // the only command that intentionally changes recipients.
+            let identities = crypto::load_identities()?;
+            let read_io = state::StateIO {
+                recipients: &[],
+                identities: &identities,
+                recipients_raw: &[],
+                schemas: &providers,
+            };
+            let mut state = state::read_state(Path::new(&state_path), &read_io)?;
+            let recipients_raw = state.encrypted_with.clone();
+            let recipients = crypto::parse_recipients(&recipients_raw)?;
+            let io = state::StateIO {
+                recipients: &recipients,
+                identities: &identities,
+                recipients_raw: &recipients_raw,
+                schemas: &providers,
+            };
+            refresh::refresh(&mut state, Path::new(&state_path), &providers, &io)?;
             println!("Refresh complete.");
             Ok(())
         }
         Command::Destroy { providers, state } => {
             let providers = build_providers(&providers, None)?;
             let state_path = state;
-            let mut state = state::read_state(Path::new(&state_path))?;
-            refresh::destroy(&mut state, Path::new(&state_path), &providers)?;
+            let identities = crypto::load_identities()?;
+            let read_io = state::StateIO {
+                recipients: &[],
+                identities: &identities,
+                recipients_raw: &[],
+                schemas: &providers,
+            };
+            let mut state = state::read_state(Path::new(&state_path), &read_io)?;
+            let recipients_raw = state.encrypted_with.clone();
+            let recipients = crypto::parse_recipients(&recipients_raw)?;
+            let io = state::StateIO {
+                recipients: &recipients,
+                identities: &identities,
+                recipients_raw: &recipients_raw,
+                schemas: &providers,
+            };
+            refresh::destroy(&mut state, Path::new(&state_path), &providers, &io)?;
             println!("Destroy complete.");
             Ok(())
         }
+        Command::Rekey {
+            file,
+            providers,
+            state,
+        } => {
+            let config_dir = config_dir_from_file(&file);
+            let providers = build_providers(&providers, config_dir)?;
+            let config = load_resource_config(&file)?;
+            config::validate_encryption(&config)?;
+            let identities = crypto::load_identities()?;
+            if identities.is_empty() {
+                return Err(
+                    "rekey requires an identity to decrypt the existing state \
+                     (set BLUE_AGE_IDENTITY or BLUE_AGE_IDENTITY_KEY)"
+                        .to_string(),
+                );
+            }
+            let recipients_raw = recipients_raw_from_config(&config);
+            let recipients = crypto::parse_recipients(&recipients_raw)?;
+            let state_path = state;
+
+            // Read with identities (decrypts existing markers under whatever
+            // recipients were used at the previous write). No recipients on
+            // the read path — we don't encrypt anything here.
+            let read_io = state::StateIO {
+                recipients: &[],
+                identities: &identities,
+                recipients_raw: &[],
+                schemas: &providers,
+            };
+            let mut state_data =
+                state::read_state(Path::new(&state_path), &read_io)?;
+
+            // Count secret values now (in-memory plaintext) so we can
+            // report what changed without instrumenting write_state.
+            let secret_count = state::count_secret_outputs(&state_data, &providers);
+
+            // Write with current config recipients — encrypts everything
+            // afresh under the new set and updates `encrypted_with`.
+            let write_io = state::StateIO {
+                recipients: &recipients,
+                identities: &identities,
+                recipients_raw: &recipients_raw,
+                schemas: &providers,
+            };
+            state::write_state(Path::new(&state_path), &mut state_data, &write_io)?;
+
+            println!(
+                "Rekey complete. {secret_count} secret value(s) re-encrypted for \
+                 {} recipient(s).",
+                recipients.len()
+            );
+            Ok(())
+        }
     }
+}
+
+/// Extract recipient strings from a parsed config, defaulting to empty
+/// when no `[encryption]` block is present.
+fn recipients_raw_from_config(config: &config::ResourceConfig) -> Vec<String> {
+    config
+        .encryption
+        .as_ref()
+        .map(|e| e.recipients.clone())
+        .unwrap_or_default()
 }
 
 fn config_dir_from_file(file: &str) -> Option<std::path::PathBuf> {

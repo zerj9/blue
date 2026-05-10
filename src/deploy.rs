@@ -8,18 +8,19 @@ use serde_json::Value;
 use crate::plan::Plan;
 use crate::provider::{OperationCtx, Providers};
 use crate::resolvable::Resolvable;
-use crate::state::{ResourceState, State, write_state};
+use crate::state::{ResourceState, State, StateIO, preserve_secret_outputs, write_state};
 use crate::types::{Action, OperationResult};
 
-struct DeployCtx {
+struct DeployCtx<'a> {
     state: Arc<Mutex<State>>,
     state_path: Arc<Path>,
     resource_name: String,
     resource_type: String,
     depends_on: Vec<String>,
+    io: &'a StateIO<'a>,
 }
 
-impl OperationCtx for DeployCtx {
+impl<'a> OperationCtx for DeployCtx<'a> {
     fn save(&self, outputs: &Value) {
         let mut state = self.state.lock().unwrap();
         if let Some(res) = state.resources.get_mut(&self.resource_name) {
@@ -35,7 +36,7 @@ impl OperationCtx for DeployCtx {
                 },
             );
         }
-        if let Err(e) = write_state(&self.state_path, &mut state) {
+        if let Err(e) = write_state(&self.state_path, &mut state, self.io) {
             eprintln!("  Warning: failed to save intermediate state: {e}");
         }
     }
@@ -46,6 +47,7 @@ pub fn execute_deploy(
     state: &mut State,
     state_path: &Path,
     providers: &Providers,
+    io: &StateIO,
 ) -> Result<(), String> {
     // Staleness check
     if state.lineage != plan.lineage || state.serial != plan.serial {
@@ -53,6 +55,28 @@ pub fn execute_deploy(
             "State has changed since plan was created (expected serial {}, got {}). Re-run plan.",
             plan.serial, state.serial
         ));
+    }
+
+    // Recipient-drift check. If state was previously written with a set
+    // of age recipients and the current config disagrees, refuse to
+    // proceed: silently re-encrypting with the new set is a security-
+    // relevant change that should be explicit. `blue rekey` is the
+    // intentional path. State.encrypted_with is empty for fresh state
+    // and for state that has never been encrypted, so no false positives
+    // on the first deploy.
+    if !state.encrypted_with.is_empty() {
+        let mut state_set = state.encrypted_with.clone();
+        state_set.sort();
+        let mut config_set: Vec<String> = io.recipients_raw.to_vec();
+        config_set.sort();
+        if state_set != config_set {
+            return Err(format!(
+                "recipient set has changed since last write\n  \
+                 state was last written with: {state_set:?}\n  \
+                 config now has:              {config_set:?}\n\
+                 run `blue rekey` to re-encrypt state with the new recipient set"
+            ));
+        }
     }
 
     let state_arc = Arc::new(Mutex::new(state.clone()));
@@ -76,6 +100,7 @@ pub fn execute_deploy(
             resource_name: step.name.clone(),
             resource_type: step.resource_type.clone(),
             depends_on: step.depends_on.clone(),
+            io,
         };
 
         let retry = res_type.schema().retry.as_ref();
@@ -128,7 +153,19 @@ pub fn execute_deploy(
             Action::Update => execute_with_retry(max_attempts, interval, &ctx, || {
                 let old_inputs = get_inputs(&state_arc, &step.name);
                 let old_outputs = get_outputs(&state_arc, &step.name);
-                res_type.update(&ctx, &old_inputs, &old_outputs, concrete_inputs.clone())
+                let mut result = res_type.update(
+                    &ctx,
+                    &old_inputs,
+                    &old_outputs,
+                    concrete_inputs.clone(),
+                )?;
+                // Carry forward any write-only secrets the API didn't
+                // re-emit on update (UpCloud's secret_access_key is the
+                // motivating case — it's only returned at create time).
+                if let OperationResult::Success { outputs } = &mut result {
+                    preserve_secret_outputs(outputs, &old_outputs, res_type.schema());
+                }
+                Ok(result)
             }),
             Action::Delete => execute_with_retry(max_attempts, interval, &ctx, || {
                 let outputs = get_outputs(&state_arc, &step.name);
@@ -143,7 +180,7 @@ pub fn execute_deploy(
                     Ok(OperationResult::Success { .. }) | Ok(OperationResult::NotFound) => {
                         let mut locked = state_arc.lock().unwrap();
                         locked.resources.remove(&step.name);
-                        write_state(&path_arc, &mut locked)?;
+                        write_state(&path_arc, &mut locked, io)?;
                     }
                     Ok(OperationResult::Failed { error, .. }) => {
                         sync_state(state, &state_arc);
@@ -168,7 +205,7 @@ pub fn execute_deploy(
             (Action::Delete, Ok(OperationResult::Success { .. } | OperationResult::NotFound)) => {
                 let mut locked = state_arc.lock().unwrap();
                 locked.resources.remove(&step.name);
-                write_state(&path_arc, &mut locked)?;
+                write_state(&path_arc, &mut locked, io)?;
             }
             (_, Ok(OperationResult::Success { outputs })) => {
                 // Make this resource's outputs available to downstream
@@ -185,12 +222,12 @@ pub fn execute_deploy(
                         depends_on: step.depends_on.clone(),
                     },
                 );
-                write_state(&path_arc, &mut locked)?;
+                write_state(&path_arc, &mut locked, io)?;
             }
             (_, Ok(OperationResult::NotFound)) => {
                 let mut locked = state_arc.lock().unwrap();
                 locked.resources.remove(&step.name);
-                write_state(&path_arc, &mut locked)?;
+                write_state(&path_arc, &mut locked, io)?;
             }
             (_, Ok(OperationResult::Failed { error, outputs })) => {
                 if let Some(outputs) = outputs {
@@ -204,7 +241,7 @@ pub fn execute_deploy(
                             depends_on: step.depends_on.clone(),
                         },
                     );
-                    write_state(&path_arc, &mut locked)?;
+                    write_state(&path_arc, &mut locked, io)?;
                 }
                 sync_state(state, &state_arc);
                 return Err(format!("Failed to deploy '{}': {error}", step.name));
@@ -318,7 +355,7 @@ triggers_replace = { key = "value" }
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
         assert_eq!(plan.steps[0].action, Action::Create);
 
-        execute_deploy(&plan, &mut state, Path::new(&path), &providers).unwrap();
+        execute_deploy(&plan, &mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
         assert!(state.resources.contains_key("test"));
 
         fs::remove_dir_all(&tmp_dir).ok();
@@ -341,7 +378,7 @@ triggers_replace = { key = "value" }
         );
 
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
-        execute_deploy(&plan, &mut state, Path::new(&path), &providers).unwrap();
+        execute_deploy(&plan, &mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
         assert!(!state.resources.contains_key("old"));
 
         fs::remove_dir_all(&tmp_dir).ok();
@@ -374,9 +411,68 @@ triggers_replace = { key = "value" }
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
         assert_eq!(plan.steps[0].action, Action::Replace);
 
-        execute_deploy(&plan, &mut state, Path::new(&path), &providers).unwrap();
+        execute_deploy(&plan, &mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
         assert!(state.resources.contains_key("test"));
         assert_eq!(state.resources["test"].inputs["script"], "new.js");
+
+        fs::remove_dir_all(&tmp_dir).ok();
+    }
+
+    #[test]
+    fn deploy_refuses_when_recipient_set_changed() {
+        let (providers, path, tmp_dir) = setup();
+        let config = parse_resource_config("").unwrap();
+
+        let mut state = State::new();
+        // Pretend state was previously written with two recipients.
+        state.encrypted_with = vec!["age1aaa".to_string(), "age1bbb".to_string()];
+        let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
+
+        // Configure deploy with a different recipient set.
+        let recipients_raw = vec!["age1ccc".to_string()];
+        let recipients: Vec<age::x25519::Recipient> = vec![]; // unused for the drift check
+        let identities: Vec<Box<dyn age::Identity>> = vec![];
+        let io = StateIO {
+            recipients: &recipients,
+            identities: &identities,
+            recipients_raw: &recipients_raw,
+            schemas: &providers,
+        };
+
+        let err = execute_deploy(&plan, &mut state, Path::new(&path), &providers, &io)
+            .unwrap_err();
+        assert!(
+            err.contains("recipient set has changed"),
+            "expected drift error, got: {err}"
+        );
+        assert!(err.contains("blue rekey"), "should hint rekey: {err}");
+
+        fs::remove_dir_all(&tmp_dir).ok();
+    }
+
+    #[test]
+    fn deploy_proceeds_when_recipients_match() {
+        let (providers, path, tmp_dir) = setup();
+        let config = parse_resource_config("").unwrap();
+
+        let mut state = State::new();
+        // State and config agree (both have these two recipients).
+        state.encrypted_with = vec!["age1aaa".to_string(), "age1bbb".to_string()];
+        let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
+
+        let recipients_raw = vec!["age1bbb".to_string(), "age1aaa".to_string()];
+        let recipients: Vec<age::x25519::Recipient> = vec![];
+        let identities: Vec<Box<dyn age::Identity>> = vec![];
+        let io = StateIO {
+            recipients: &recipients,
+            identities: &identities,
+            recipients_raw: &recipients_raw,
+            schemas: &providers,
+        };
+
+        // Empty plan, sets match (after sort) — should succeed without
+        // running any provider calls.
+        execute_deploy(&plan, &mut state, Path::new(&path), &providers, &io).unwrap();
 
         fs::remove_dir_all(&tmp_dir).ok();
     }
