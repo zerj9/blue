@@ -4,6 +4,7 @@ pub mod managed_object_storage_resource;
 pub mod managed_object_storage_user_access_key_resource;
 pub mod managed_object_storage_user_policy_resource;
 pub mod managed_object_storage_user_resource;
+pub mod network_resource;
 pub mod storage_data_source;
 pub mod storage_resource;
 
@@ -23,12 +24,14 @@ use managed_object_storage_resource::UpCloudManagedObjectStorageResource;
 use managed_object_storage_user_access_key_resource::UpCloudManagedObjectStorageUserAccessKeyResource;
 use managed_object_storage_user_policy_resource::UpCloudManagedObjectStorageUserPolicyResource;
 use managed_object_storage_user_resource::UpCloudManagedObjectStorageUserResource;
+use network_resource::UpCloudNetworkResource;
 use storage_data_source::UpCloudStorageDataSource;
 use storage_resource::UpCloudStorageResource;
 
 pub struct UpCloudProvider {
     storage_data_source: UpCloudStorageDataSource,
     storage_resource: UpCloudStorageResource,
+    network_resource: UpCloudNetworkResource,
     managed_object_storage_resource: UpCloudManagedObjectStorageResource,
     managed_object_storage_bucket_resource: UpCloudManagedObjectStorageBucketResource,
     managed_object_storage_user_resource: UpCloudManagedObjectStorageUserResource,
@@ -41,6 +44,7 @@ impl ProviderInstance for UpCloudProvider {
     fn resource_type(&self, name: &str) -> Option<&dyn ResourceType> {
         match name {
             "storage" => Some(&self.storage_resource),
+            "network" => Some(&self.network_resource),
             "managed_object_storage" => Some(&self.managed_object_storage_resource),
             "managed_object_storage_bucket" => Some(&self.managed_object_storage_bucket_resource),
             "managed_object_storage_user" => Some(&self.managed_object_storage_user_resource),
@@ -131,6 +135,7 @@ pub fn register(
     let client = Arc::new(UpCloudClient::new(auth_header));
     let storage_data_source = UpCloudStorageDataSource::new(Arc::clone(&client));
     let storage_resource = UpCloudStorageResource::new(Arc::clone(&client));
+    let network_resource = UpCloudNetworkResource::new(Arc::clone(&client));
     let managed_object_storage_resource =
         UpCloudManagedObjectStorageResource::new(Arc::clone(&client));
     let managed_object_storage_bucket_resource =
@@ -146,6 +151,7 @@ pub fn register(
         Box::new(UpCloudProvider {
             storage_data_source,
             storage_resource,
+            network_resource,
             managed_object_storage_resource,
             managed_object_storage_bucket_resource,
             managed_object_storage_user_resource,

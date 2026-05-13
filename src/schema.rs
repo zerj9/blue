@@ -142,9 +142,14 @@ pub fn parse_schema(toml_str: &str) -> Result<Schema, String> {
 ///   is inserted.
 /// - If the field is present and is an object with declared `fields`,
 ///   recurse into the child schema so nested defaults can fill in.
+/// - If the field is present and is an array whose `items` declare nested
+///   fields (i.e. an "array of objects" — not scalar items), recurse into
+///   each element so per-item defaults fill in. Arrays of scalars are left
+///   alone since they have no per-item fields to default.
 ///
-/// Arrays are not recursed into — each user-supplied element is treated as
-/// the user's complete object. This function is idempotent.
+/// Defaults are substitution, not synthesis: an absent intermediate object
+/// or array stays absent — its children's defaults don't materialize a
+/// parent. This function is idempotent.
 pub fn apply_defaults(schema: &[FieldDef], value: JsonValue) -> JsonValue {
     let mut obj = value.as_object().cloned().unwrap_or_default();
     for field in schema {
@@ -158,6 +163,17 @@ pub fn apply_defaults(schema: &[FieldDef], value: JsonValue) -> JsonValue {
                 if matches!(field.field_type, FieldType::Object) && !field.fields.is_empty() {
                     let recursed = apply_defaults(&field.fields, existing.clone());
                     obj.insert(field.path.clone(), recursed);
+                } else if matches!(field.field_type, FieldType::Array)
+                    && !field.items.is_empty()
+                    && !(field.items.len() == 1 && field.items[0].path.is_empty())
+                {
+                    if let Some(arr) = existing.as_array() {
+                        let recursed: Vec<JsonValue> = arr
+                            .iter()
+                            .map(|item| apply_defaults(&field.items, item.clone()))
+                            .collect();
+                        obj.insert(field.path.clone(), JsonValue::Array(recursed));
+                    }
                 }
             }
         }
@@ -889,7 +905,7 @@ default = 30
     }
 
     #[test]
-    fn apply_defaults_skips_array_items() {
+    fn apply_defaults_recurses_into_array_items() {
         let inputs = schema_for(
             r#"
 [inputs.rules]
@@ -903,10 +919,101 @@ type = "number"
 default = 100
 "#,
         );
-        // Array elements aren't recursed into
-        let input = json!({"rules": [{"direction": "in"}]});
-        let result = apply_defaults(&inputs, input.clone());
-        assert_eq!(result, input);
+        let result = apply_defaults(&inputs, json!({"rules": [{"direction": "in"}]}));
+        assert_eq!(
+            result,
+            json!({"rules": [{"direction": "in", "priority": 100}]})
+        );
+    }
+
+    #[test]
+    fn apply_defaults_does_not_synthesize_missing_array_parent() {
+        // Symmetric with the missing-object case: defaults are substitution,
+        // not synthesis. If the user omits the array entirely, we don't
+        // materialize it from per-item defaults.
+        let inputs = schema_for(
+            r#"
+[inputs.rules]
+type = "array"
+
+[inputs.rules.items.priority]
+type = "number"
+default = 100
+"#,
+        );
+        let result = apply_defaults(&inputs, json!({}));
+        assert_eq!(result, json!({}));
+    }
+
+    #[test]
+    fn apply_defaults_does_not_touch_scalar_array_items() {
+        // Arrays of scalars (e.g. dhcp_dns = [...]) have no per-item fields
+        // to default. The recursion guard must skip them so user values are
+        // preserved verbatim.
+        let inputs = schema_for(
+            r#"
+[inputs.dns]
+type = "array"
+items = { type = "string" }
+"#,
+        );
+        let result = apply_defaults(&inputs, json!({"dns": ["1.1.1.1", "8.8.8.8"]}));
+        assert_eq!(result, json!({"dns": ["1.1.1.1", "8.8.8.8"]}));
+    }
+
+    #[test]
+    fn apply_defaults_recurses_into_nested_objects_inside_array_items() {
+        // array → object → object → default scalar. Confirms the array
+        // branch and the existing object branch compose via mutual recursion.
+        let inputs = schema_for(
+            r#"
+[inputs.networks]
+type = "array"
+
+[inputs.networks.items.dhcp_routes_configuration]
+type = "object"
+
+[inputs.networks.items.dhcp_routes_configuration.fields.effective_routes_auto_population]
+type = "object"
+
+[inputs.networks.items.dhcp_routes_configuration.fields.effective_routes_auto_population.fields.enabled]
+type = "string"
+default = "no"
+"#,
+        );
+        let result = apply_defaults(
+            &inputs,
+            json!({
+                "networks": [
+                    {"dhcp_routes_configuration": {"effective_routes_auto_population": {}}},
+                ],
+            }),
+        );
+        assert_eq!(
+            result,
+            json!({
+                "networks": [
+                    {"dhcp_routes_configuration": {"effective_routes_auto_population": {"enabled": "no"}}},
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn apply_defaults_is_idempotent_for_array_items() {
+        let inputs = schema_for(
+            r#"
+[inputs.rules]
+type = "array"
+
+[inputs.rules.items.priority]
+type = "number"
+default = 100
+"#,
+        );
+        let once = apply_defaults(&inputs, json!({"rules": [{}]}));
+        let twice = apply_defaults(&inputs, once.clone());
+        assert_eq!(once, twice);
     }
 
     #[test]

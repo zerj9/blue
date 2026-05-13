@@ -1,0 +1,131 @@
+section = "Network"
+
+[inputs.name]
+type = "string"
+required = true
+description = "Network name."
+
+[inputs.zone]
+type = "string"
+required = true
+force_new = true
+description = "UpCloud zone identifier (e.g. uk-lon1). Cannot be changed after creation."
+
+[inputs.router]
+type = "string"
+description = "UUID of an existing router to attach this network to. Omit (or set to empty string) to leave the network unattached. Can be changed after creation."
+
+[inputs.labels]
+type = "array"
+description = "Key-value labels classifying the network (max 255)."
+
+[inputs.labels.items.key]
+type = "string"
+required = true
+description = "Label key: 2-32 printable ASCII chars, must not start with underscore."
+
+[inputs.labels.items.value]
+type = "string"
+required = true
+description = "Label value: 0-255 characters."
+
+[inputs.ip_networks]
+type = "array"
+required = true
+description = "IP networks defined within this SDN private network. UpCloud currently allows a single IPv4 entry per network."
+
+[inputs.ip_networks.items.address]
+type = "string"
+required = true
+description = "Address block with netmask (e.g. 172.16.0.0/22)."
+
+[inputs.ip_networks.items.dhcp]
+type = "string"
+default = "yes"
+description = "Toggles DHCP service for the network: yes or no."
+
+[inputs.ip_networks.items.dhcp_default_route]
+type = "string"
+description = "Whether the gateway should be given as default route by DHCP: yes or no. Defaults to no on SDN private networks."
+
+[inputs.ip_networks.items.dhcp_dns]
+type = "array"
+description = "DNS server addresses given by DHCP. NOTE: not implemented on SDN private networks per UpCloud, but the field is accepted at create time."
+items = { type = "string" }
+
+[inputs.ip_networks.items.dhcp_routes]
+type = "array"
+description = "Classless static routes delivered by DHCP. Each entry is a prefix string with an optional nexthop override (e.g. 192.168.0.0/24-nexthop=10.0.1.100). Default nexthop is the gateway address."
+items = { type = "string" }
+
+[inputs.ip_networks.items.dhcp_bootfile_url]
+type = "string"
+description = "TFTP URL to a boot file given by DHCP (e.g. tftp://172.16.0.253/pxelinux.0)."
+
+[inputs.ip_networks.items.family]
+type = "string"
+default = "IPv4"
+description = "IP address family. Currently only IPv4 is supported."
+
+[inputs.ip_networks.items.gateway]
+type = "string"
+description = "Gateway IPv4 address advertised by DHCP. Defaults to the first address of the network if not given."
+
+[inputs.ip_networks.items.dhcp_routes_configuration]
+type = "object"
+description = "DHCP routes configuration block. Controls effective-routes auto-population."
+
+[inputs.ip_networks.items.dhcp_routes_configuration.fields.effective_routes_auto_population]
+type = "object"
+description = "Effective-routes auto-population settings."
+
+[inputs.ip_networks.items.dhcp_routes_configuration.fields.effective_routes_auto_population.fields.enabled]
+type = "string"
+description = "Whether DHCP effective-route auto-population is enabled: yes or no. Network peering routes are auto-populated regardless."
+
+[inputs.ip_networks.items.dhcp_routes_configuration.fields.effective_routes_auto_population.fields.exclude_by_source]
+type = "array"
+description = "Route sources to exclude from auto-population. Each entry must be 'router-connected-networks' or 'static-route'."
+items = { type = "string" }
+
+[inputs.ip_networks.items.dhcp_routes_configuration.fields.effective_routes_auto_population.fields.filter_by_destination]
+type = "array"
+description = "IPv4/IPv6 destination prefix filters for auto-population. Empty array means no filter."
+items = { type = "string" }
+
+[inputs.ip_networks.items.dhcp_routes_configuration.fields.effective_routes_auto_population.fields.filter_by_route_type]
+type = "array"
+description = "Static route type filters. Each entry must be 'user' or 'service'. Empty array means no filter."
+items = { type = "string" }
+
+[outputs.uuid]
+type = "string"
+description = "Network UUID."
+
+[outputs.name]
+type = "string"
+description = "Current network name."
+
+[outputs.type]
+type = "string"
+description = "Network type. Always 'private' for SDN private networks created by this resource."
+
+[outputs.zone]
+type = "string"
+description = "Zone where the network was created."
+
+[outputs.router]
+type = "string"
+description = "UUID of the attached router, or empty when not attached."
+
+[outputs.ip_networks]
+type = "array"
+description = "IP network blocks as currently configured (per-entry dhcp_effective_routes is omitted; consult the UpCloud control panel or API directly for live effective routes)."
+
+[outputs.effective_routes]
+type = "array"
+description = "Server-computed effective routes for this network (router-connected-networks, network-peering, static-route, etc.)."
+
+[outputs.labels]
+type = "array"
+description = "Labels as currently set on the network."
