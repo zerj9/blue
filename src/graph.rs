@@ -381,9 +381,11 @@ filters = { uuid = "{{ resources.web-01.uuid }}" }
 
         let result = Graph::from_config_and_state(&config, &empty_state());
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("data sources may only depend on parameters"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("data sources may only depend on parameters")
+        );
     }
 
     #[test]

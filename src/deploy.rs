@@ -153,12 +153,8 @@ pub fn execute_deploy(
             Action::Update => execute_with_retry(max_attempts, interval, &ctx, || {
                 let old_inputs = get_inputs(&state_arc, &step.name);
                 let old_outputs = get_outputs(&state_arc, &step.name);
-                let mut result = res_type.update(
-                    &ctx,
-                    &old_inputs,
-                    &old_outputs,
-                    concrete_inputs.clone(),
-                )?;
+                let mut result =
+                    res_type.update(&ctx, &old_inputs, &old_outputs, concrete_inputs.clone())?;
                 // Carry forward any write-only secrets the API didn't
                 // re-emit on update (UpCloud's secret_access_key is the
                 // motivating case — it's only returned at create time).
@@ -355,7 +351,14 @@ triggers_replace = { key = "value" }
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
         assert_eq!(plan.steps[0].action, Action::Create);
 
-        execute_deploy(&plan, &mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
+        execute_deploy(
+            &plan,
+            &mut state,
+            Path::new(&path),
+            &providers,
+            &StateIO::plaintext(),
+        )
+        .unwrap();
         assert!(state.resources.contains_key("test"));
 
         fs::remove_dir_all(&tmp_dir).ok();
@@ -378,7 +381,14 @@ triggers_replace = { key = "value" }
         );
 
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
-        execute_deploy(&plan, &mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
+        execute_deploy(
+            &plan,
+            &mut state,
+            Path::new(&path),
+            &providers,
+            &StateIO::plaintext(),
+        )
+        .unwrap();
         assert!(!state.resources.contains_key("old"));
 
         fs::remove_dir_all(&tmp_dir).ok();
@@ -411,7 +421,14 @@ triggers_replace = { key = "value" }
         let plan = create_plan(&config, &state, &providers, &HashMap::new()).unwrap();
         assert_eq!(plan.steps[0].action, Action::Replace);
 
-        execute_deploy(&plan, &mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
+        execute_deploy(
+            &plan,
+            &mut state,
+            Path::new(&path),
+            &providers,
+            &StateIO::plaintext(),
+        )
+        .unwrap();
         assert!(state.resources.contains_key("test"));
         assert_eq!(state.resources["test"].inputs["script"], "new.js");
 
@@ -439,8 +456,7 @@ triggers_replace = { key = "value" }
             schemas: &providers,
         };
 
-        let err = execute_deploy(&plan, &mut state, Path::new(&path), &providers, &io)
-            .unwrap_err();
+        let err = execute_deploy(&plan, &mut state, Path::new(&path), &providers, &io).unwrap_err();
         assert!(
             err.contains("recipient set has changed"),
             "expected drift error, got: {err}"

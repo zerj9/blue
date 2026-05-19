@@ -259,9 +259,7 @@ impl Resolvable {
         match self {
             Resolvable::Known(_) => Ok(self),
             Resolvable::Unknown {
-                raw,
-                expected_type,
-                ..
+                raw, expected_type, ..
             } => resolve_string(&raw, expected_type, outputs),
             Resolvable::Object(map) => {
                 let mut out = BTreeMap::new();
@@ -621,10 +619,7 @@ mod tests {
     fn object_with_unknown_descendant_is_not_concrete() {
         let mut map = BTreeMap::new();
         map.insert("ok".into(), Resolvable::known(json!("a")));
-        map.insert(
-            "pending".into(),
-            pending("{{ resources.x.uuid }}", None),
-        );
+        map.insert("pending".into(), pending("{{ resources.x.uuid }}", None));
         let r = Resolvable::Object(map);
         assert!(!r.is_concrete());
     }

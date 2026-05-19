@@ -68,9 +68,9 @@ impl UpCloudManagedObjectStorageUserPolicyResource {
             .body_mut()
             .read_json()
             .map_err(|e| format!("upcloud GET {path} response parse failed: {e}"))?;
-        let entries = listing.as_array().ok_or_else(|| {
-            format!("upcloud GET {path} expected JSON array; got: {listing}")
-        })?;
+        let entries = listing
+            .as_array()
+            .ok_or_else(|| format!("upcloud GET {path} expected JSON array; got: {listing}"))?;
         Ok(entries
             .iter()
             .find(|entry| {
@@ -256,12 +256,7 @@ fn validate_policy_name(name: &str) -> Result<(), String> {
 /// Build outputs by combining the listing entry (for `arn`) with the
 /// identifying inputs (mirrored so refresh/delete can find their target
 /// even if the listing endpoint stops echoing them in the future).
-fn extract_outputs(
-    entry: &Value,
-    service_uuid: &str,
-    username: &str,
-    policy_name: &str,
-) -> Value {
+fn extract_outputs(entry: &Value, service_uuid: &str, username: &str, policy_name: &str) -> Value {
     let mut out = Map::new();
     if let Some(obj) = entry.as_object() {
         if let Some(v) = obj.get("arn") {

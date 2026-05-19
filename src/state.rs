@@ -174,11 +174,7 @@ pub fn count_secret_outputs(state: &State, schemas: &dyn SchemaResolver) -> usiz
 /// secret and the only copy is gone.
 ///
 /// Top-level flat walk only — matches the schema's flat output shape.
-pub fn preserve_secret_outputs(
-    new_outputs: &mut Value,
-    old_outputs: &Value,
-    schema: &Schema,
-) {
+pub fn preserve_secret_outputs(new_outputs: &mut Value, old_outputs: &Value, schema: &Schema) {
     let (Value::Object(new_map), Value::Object(old_map)) = (new_outputs, old_outputs) else {
         return;
     };
@@ -290,7 +286,11 @@ mod tests {
     struct OneSchema(String, Schema);
     impl SchemaResolver for OneSchema {
         fn schema(&self, type_name: &str) -> Option<&Schema> {
-            if type_name == self.0 { Some(&self.1) } else { None }
+            if type_name == self.0 {
+                Some(&self.1)
+            } else {
+                None
+            }
         }
     }
 
@@ -415,7 +415,10 @@ mod tests {
 
         // Reading back through StateIO with the matching identity decrypts.
         let loaded = read_state(&path, &io).unwrap();
-        assert_eq!(loaded.resources["myres"].outputs["api_key"], "AKIA-SUPER-SECRET");
+        assert_eq!(
+            loaded.resources["myres"].outputs["api_key"],
+            "AKIA-SUPER-SECRET"
+        );
         assert_eq!(loaded.resources["myres"].outputs["public"], "visible");
         assert_eq!(loaded.encrypted_with, recipients_raw);
 
@@ -534,7 +537,10 @@ mod tests {
 
         // Read with no identity — succeeds because no markers exist.
         let mut state = read_state(&path, &StateIO::plaintext()).unwrap();
-        assert_eq!(state.resources["myres"].outputs["api_key"], "plain-text-secret");
+        assert_eq!(
+            state.resources["myres"].outputs["api_key"],
+            "plain-text-secret"
+        );
         assert!(state.encrypted_with.is_empty());
 
         // Write with recipients + schema — value gets encrypted.
@@ -555,8 +561,14 @@ mod tests {
         write_state(&path, &mut state, &io).unwrap();
 
         let after = fs::read_to_string(&path).unwrap();
-        assert!(!after.contains("plain-text-secret"), "secret still plaintext: {after}");
-        assert!(after.contains("<blue:enc:v1:"), "no marker after upgrade: {after}");
+        assert!(
+            !after.contains("plain-text-secret"),
+            "secret still plaintext: {after}"
+        );
+        assert!(
+            after.contains("<blue:enc:v1:"),
+            "no marker after upgrade: {after}"
+        );
 
         fs::remove_file(&path).ok();
     }
@@ -875,8 +887,7 @@ mod tests {
         let rec_b = id_b.to_public().to_string();
         let recipients_raw = vec![rec_b.clone(), rec_a.clone()];
 
-        let recipients =
-            crypto::parse_recipients(&recipients_raw).unwrap();
+        let recipients = crypto::parse_recipients(&recipients_raw).unwrap();
         let identities: Vec<Box<dyn age::Identity>> = vec![Box::new(id_a)];
         let resolver = NoSchemas;
         let io = StateIO {

@@ -10,8 +10,7 @@ use crate::types::{OperationResult, Schema};
 
 use super::client::UpCloudClient;
 
-const SCHEMA: &str =
-    include_str!("schemas/upcloud_managed_object_storage_bucket_resource.toml");
+const SCHEMA: &str = include_str!("schemas/upcloud_managed_object_storage_bucket_resource.toml");
 
 /// Bucket fields surfaced as Blue outputs. `service_uuid` is added separately
 /// (mirrored from inputs, since the API response doesn't include it).
@@ -171,12 +170,9 @@ impl ResourceType for UpCloudManagedObjectStorageBucketResource {
             .ok_or_else(|| {
                 "upcloud.managed_object_storage_bucket create: missing 'service_uuid'".to_string()
             })?;
-        let name = inputs
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                "upcloud.managed_object_storage_bucket create: missing 'name'".to_string()
-            })?;
+        let name = inputs.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
+            "upcloud.managed_object_storage_bucket create: missing 'name'".to_string()
+        })?;
         let bucket = self.create_bucket(service_uuid, name)?;
         // Persist the identifying inputs as soon as the bucket exists, so a
         // crash before this function returns doesn't strand the resource —

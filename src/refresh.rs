@@ -136,7 +136,13 @@ mod tests {
             },
         );
 
-        refresh(&mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
+        refresh(
+            &mut state,
+            Path::new(&path),
+            &providers,
+            &StateIO::plaintext(),
+        )
+        .unwrap();
         // Script resource read returns stored outputs unchanged
         assert_eq!(state.resources["test"].outputs["result"], "old");
 
@@ -166,7 +172,13 @@ mod tests {
             },
         );
 
-        destroy(&mut state, Path::new(&path), &providers, &StateIO::plaintext()).unwrap();
+        destroy(
+            &mut state,
+            Path::new(&path),
+            &providers,
+            &StateIO::plaintext(),
+        )
+        .unwrap();
         assert!(state.resources.is_empty());
 
         fs::remove_file(&path).ok();

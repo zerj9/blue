@@ -119,11 +119,7 @@ impl UpCloudManagedObjectStorageResource {
     /// Same transient-error tolerance as `poll_until_target_state`: up to
     /// `POLL_MAX_CONSECUTIVE_ERRORS` consecutive transport failures are
     /// absorbed before bailing out.
-    fn poll_until_gone(
-        &self,
-        uuid: &str,
-        max_consecutive_errors: u32,
-    ) -> Result<(), String> {
+    fn poll_until_gone(&self, uuid: &str, max_consecutive_errors: u32) -> Result<(), String> {
         let deadline = Instant::now() + POLL_TIMEOUT;
         let mut consecutive_errors: u32 = 0;
         loop {
@@ -200,9 +196,7 @@ impl UpCloudManagedObjectStorageResource {
                     }
                 }
                 Ok(None) => {
-                    return Err(format!(
-                        "upcloud service {uuid} disappeared while polling"
-                    ));
+                    return Err(format!("upcloud service {uuid} disappeared while polling"));
                 }
                 Err(e) => {
                     consecutive_errors += 1;
@@ -248,19 +242,19 @@ impl ResourceType for UpCloudManagedObjectStorageResource {
             .get("configured_status")
             .and_then(|v| v.as_str())
             .unwrap_or("started");
-        let service = self.poll_until_target_state(
-            &uuid,
-            configured_status,
-            POLL_MAX_CONSECUTIVE_ERRORS,
-        )?;
+        let service =
+            self.poll_until_target_state(&uuid, configured_status, POLL_MAX_CONSECUTIVE_ERRORS)?;
         let outputs = extract_outputs(&service, inputs.get("force_destroy"));
         Ok(OperationResult::Success { outputs })
     }
 
     fn read(&self, outputs: &Value) -> Result<OperationResult, String> {
-        let uuid = outputs.get("uuid").and_then(|v| v.as_str()).ok_or_else(|| {
-            "upcloud.managed_object_storage read: missing 'uuid' in stored outputs".to_string()
-        })?;
+        let uuid = outputs
+            .get("uuid")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                "upcloud.managed_object_storage read: missing 'uuid' in stored outputs".to_string()
+            })?;
         match self.get_service(uuid)? {
             Some(service) => {
                 // force_destroy isn't a UpCloud field — carry it forward from
@@ -314,19 +308,20 @@ impl ResourceType for UpCloudManagedObjectStorageResource {
             .get("configured_status")
             .and_then(|v| v.as_str())
             .unwrap_or("started");
-        let service = self.poll_until_target_state(
-            &uuid,
-            configured_status,
-            POLL_MAX_CONSECUTIVE_ERRORS,
-        )?;
+        let service =
+            self.poll_until_target_state(&uuid, configured_status, POLL_MAX_CONSECUTIVE_ERRORS)?;
         let outputs = extract_outputs(&service, new_inputs.get("force_destroy"));
         Ok(OperationResult::Success { outputs })
     }
 
     fn delete(&self, _ctx: &dyn OperationCtx, outputs: &Value) -> Result<OperationResult, String> {
-        let uuid = outputs.get("uuid").and_then(|v| v.as_str()).ok_or_else(|| {
-            "upcloud.managed_object_storage delete: missing 'uuid' in stored outputs".to_string()
-        })?;
+        let uuid = outputs
+            .get("uuid")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                "upcloud.managed_object_storage delete: missing 'uuid' in stored outputs"
+                    .to_string()
+            })?;
 
         // Pre-flight: refuse to attempt the API call if our stored state says
         // termination_protection is on. UpCloud would return 400 SERVICE_ERROR

@@ -16,12 +16,7 @@ const SCHEMA: &str =
 /// response includes neither). `last_used_at` is deliberately not
 /// surfaced: it mutates whenever the key is used by any S3 client out of
 /// band, which would produce drift on every refresh.
-const OUTPUT_FIELDS: &[&str] = &[
-    "access_key_id",
-    "secret_access_key",
-    "status",
-    "created_at",
-];
+const OUTPUT_FIELDS: &[&str] = &["access_key_id", "secret_access_key", "status", "created_at"];
 
 pub struct UpCloudManagedObjectStorageUserAccessKeyResource {
     schema: Schema,
@@ -325,10 +320,7 @@ fn extract_outputs(key: &Value, service_uuid: &str, username: &str) -> Value {
         "service_uuid".to_string(),
         Value::String(service_uuid.to_string()),
     );
-    out.insert(
-        "username".to_string(),
-        Value::String(username.to_string()),
-    );
+    out.insert("username".to_string(), Value::String(username.to_string()));
     Value::Object(out)
 }
 
@@ -399,7 +391,10 @@ mod tests {
         let outputs = extract_outputs(&key, "svc-uuid-123", "alice");
         let obj = outputs.as_object().unwrap();
         assert_eq!(obj["access_key_id"], "AKIA589142A152F5E423");
-        assert_eq!(obj["secret_access_key"], "xbINHFALkXjFjmxhAYL8mJnODRDX91OM7cCd2+1Y");
+        assert_eq!(
+            obj["secret_access_key"],
+            "xbINHFALkXjFjmxhAYL8mJnODRDX91OM7cCd2+1Y"
+        );
         assert_eq!(obj["status"], "Active");
         assert_eq!(obj["created_at"], "2023-05-07T22:58:26.239729Z");
         assert_eq!(obj["service_uuid"], "svc-uuid-123");
@@ -431,9 +426,11 @@ mod tests {
             "created_at": "2023-05-07T22:58:26.239729Z",
         });
         let outputs = extract_outputs(&key, "svc", "u");
-        assert!(!outputs
-            .as_object()
-            .unwrap()
-            .contains_key("secret_access_key"));
+        assert!(
+            !outputs
+                .as_object()
+                .unwrap()
+                .contains_key("secret_access_key")
+        );
     }
 }

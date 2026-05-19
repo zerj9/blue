@@ -116,9 +116,10 @@ impl ResourceType for UpCloudNetworkResource {
     }
 
     fn read(&self, outputs: &Value) -> Result<OperationResult, String> {
-        let uuid = outputs.get("uuid").and_then(|v| v.as_str()).ok_or_else(|| {
-            "upcloud.network read: missing 'uuid' in stored outputs".to_string()
-        })?;
+        let uuid = outputs
+            .get("uuid")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "upcloud.network read: missing 'uuid' in stored outputs".to_string())?;
         match self.get_network(uuid)? {
             Some(network) => Ok(OperationResult::Success {
                 outputs: extract_outputs(&network),
@@ -137,9 +138,7 @@ impl ResourceType for UpCloudNetworkResource {
         let uuid = old_outputs
             .get("uuid")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                "upcloud.network update: missing 'uuid' in old outputs".to_string()
-            })?;
+            .ok_or_else(|| "upcloud.network update: missing 'uuid' in old outputs".to_string())?;
         let network = self.modify_network(uuid, &new_inputs)?;
         Ok(OperationResult::Success {
             outputs: extract_outputs(&network),
@@ -147,9 +146,12 @@ impl ResourceType for UpCloudNetworkResource {
     }
 
     fn delete(&self, _ctx: &dyn OperationCtx, outputs: &Value) -> Result<OperationResult, String> {
-        let uuid = outputs.get("uuid").and_then(|v| v.as_str()).ok_or_else(|| {
-            "upcloud.network delete: missing 'uuid' in stored outputs".to_string()
-        })?;
+        let uuid = outputs
+            .get("uuid")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                "upcloud.network delete: missing 'uuid' in stored outputs".to_string()
+            })?;
         let path = format!("/network/{uuid}");
         let mut resp = self.client.delete(&path)?;
         let status = resp.status().as_u16();
@@ -207,9 +209,7 @@ fn validate_ip_network_entry(entry: &Value, path: &str) -> Result<(), String> {
     for field in ["dhcp", "dhcp_default_route"] {
         if let Some(v) = entry.get(field).and_then(|v| v.as_str()) {
             if v != "yes" && v != "no" {
-                return Err(format!(
-                    "{path}.{field} must be 'yes' or 'no'; got '{v}'"
-                ));
+                return Err(format!("{path}.{field} must be 'yes' or 'no'; got '{v}'"));
             }
         }
     }
@@ -487,7 +487,10 @@ mod tests {
             "ip_networks": [{"address": "10.0.0.0/24"}],
         });
         let body = build_create_body(&inputs);
-        assert_eq!(body.get("network").unwrap().get("router").unwrap(), &Value::Null);
+        assert_eq!(
+            body.get("network").unwrap().get("router").unwrap(),
+            &Value::Null
+        );
     }
 
     #[test]

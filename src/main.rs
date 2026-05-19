@@ -212,11 +212,9 @@ fn run(cli: Cli) -> Result<(), String> {
             config::validate_encryption(&config)?;
             let identities = crypto::load_identities()?;
             if identities.is_empty() {
-                return Err(
-                    "rekey requires an identity to decrypt the existing state \
+                return Err("rekey requires an identity to decrypt the existing state \
                      (set BLUE_AGE_IDENTITY or BLUE_AGE_IDENTITY_KEY)"
-                        .to_string(),
-                );
+                    .to_string());
             }
             let recipients_raw = recipients_raw_from_config(&config);
             let recipients = crypto::parse_recipients(&recipients_raw)?;
@@ -231,8 +229,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 recipients_raw: &[],
                 schemas: &providers,
             };
-            let mut state_data =
-                state::read_state(Path::new(&state_path), &read_io)?;
+            let mut state_data = state::read_state(Path::new(&state_path), &read_io)?;
 
             // Count secret values now (in-memory plaintext) so we can
             // report what changed without instrumenting write_state.

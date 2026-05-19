@@ -158,14 +158,15 @@ fn values_equal_with_resolvable(
                 return false;
             };
             let keys: HashSet<&String> = old_obj.keys().chain(new_map.keys()).collect();
-            keys.iter().all(|k| match (old_obj.get(*k), new_map.get(*k)) {
-                (Some(av), Some(bv)) => {
-                    let child_def = fields.iter().find(|f| f.path == **k);
-                    let child_fields = child_def.map(|f| f.items.as_slice()).unwrap_or(&[]);
-                    values_equal_with_resolvable(av, bv, child_def, child_fields)
-                }
-                _ => false,
-            })
+            keys.iter()
+                .all(|k| match (old_obj.get(*k), new_map.get(*k)) {
+                    (Some(av), Some(bv)) => {
+                        let child_def = fields.iter().find(|f| f.path == **k);
+                        let child_fields = child_def.map(|f| f.items.as_slice()).unwrap_or(&[]);
+                        values_equal_with_resolvable(av, bv, child_def, child_fields)
+                    }
+                    _ => false,
+                })
         }
         Resolvable::Array(new_arr) => {
             let Value::Array(old_arr) = old else {
@@ -179,10 +180,7 @@ fn values_equal_with_resolvable(
                 // The set-equality logic relies on canonical strings, which
                 // can't be computed for an Unknown leaf without inventing
                 // a sentinel — and pretending they're equal is worse.
-                if new_arr
-                    .iter()
-                    .any(|r| !matches!(r, Resolvable::Known(_)))
-                {
+                if new_arr.iter().any(|r| !matches!(r, Resolvable::Known(_))) {
                     return false;
                 }
                 if old_arr.len() != new_arr.len() {

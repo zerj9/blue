@@ -202,5 +202,4 @@ mod tests {
         let result = extract_refs("{{ resources.x.uuid");
         assert!(result.is_err());
     }
-
 }

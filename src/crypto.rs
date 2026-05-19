@@ -200,16 +200,10 @@ mod tests {
         let marker = encrypt_value("res.field", "shared secret", &[rec_a, rec_b]).unwrap();
 
         let only_a: Vec<Box<dyn age::Identity>> = vec![Box::new(id_a)];
-        assert_eq!(
-            decrypt_value(&marker, &only_a).unwrap(),
-            "shared secret"
-        );
+        assert_eq!(decrypt_value(&marker, &only_a).unwrap(), "shared secret");
 
         let only_b: Vec<Box<dyn age::Identity>> = vec![Box::new(id_b)];
-        assert_eq!(
-            decrypt_value(&marker, &only_b).unwrap(),
-            "shared secret"
-        );
+        assert_eq!(decrypt_value(&marker, &only_b).unwrap(), "shared secret");
     }
 
     #[test]
@@ -243,7 +237,10 @@ mod tests {
         let identities: Vec<Box<dyn age::Identity>> = vec![Box::new(id)];
         // No colon between fingerprint and ciphertext.
         let err = decrypt_value("<blue:enc:v1:nofingerprintseparator>", &identities).unwrap_err();
-        assert!(err.contains("separator") || err.contains("base64"), "got: {err}");
+        assert!(
+            err.contains("separator") || err.contains("base64"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -312,10 +309,8 @@ mod tests {
         let id = age::x25519::Identity::generate();
         let id_str = id.to_string();
 
-        let tmp = std::path::PathBuf::from(format!(
-            "/tmp/blue_test_id_{}.txt",
-            uuid::Uuid::new_v4()
-        ));
+        let tmp =
+            std::path::PathBuf::from(format!("/tmp/blue_test_id_{}.txt", uuid::Uuid::new_v4()));
         let mut f = std::fs::File::create(&tmp).unwrap();
         // age-keygen identity files allow comment lines starting with '#';
         // include one so we exercise the comment-tolerant parsing path.

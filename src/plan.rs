@@ -598,7 +598,9 @@ triggers_replace = { up_uuid = "{{ resources.upstream.uuid }}" }
         assert_eq!(upstream.action, Action::Create);
         assert_eq!(downstream.action, Action::Create);
         assert!(
-            downstream.depends_on.contains(&"resources.upstream".to_string()),
+            downstream
+                .depends_on
+                .contains(&"resources.upstream".to_string()),
             "downstream should depend on upstream; got {:?}",
             downstream.depends_on,
         );
@@ -1051,7 +1053,11 @@ type = "test.with_secret"
         .unwrap();
         let schema = schema_with_secret();
         let lookup = |name: &str| {
-            if name == "test.with_secret" { Some(&schema) } else { None }
+            if name == "test.with_secret" {
+                Some(&schema)
+            } else {
+                None
+            }
         };
         let err = refuse_if_secrets_without_recipients_inner(&config, lookup).unwrap_err();
         assert!(err.contains("with_secret"), "got: {err}");
@@ -1073,7 +1079,11 @@ type = "test.with_secret"
         .unwrap();
         let schema = schema_with_secret();
         let lookup = |name: &str| {
-            if name == "test.with_secret" { Some(&schema) } else { None }
+            if name == "test.with_secret" {
+                Some(&schema)
+            } else {
+                None
+            }
         };
         refuse_if_secrets_without_recipients_inner(&config, lookup).unwrap();
     }
@@ -1089,7 +1099,11 @@ type = "test.public"
         .unwrap();
         let schema = schema_without_secret();
         let lookup = |name: &str| {
-            if name == "test.public" { Some(&schema) } else { None }
+            if name == "test.public" {
+                Some(&schema)
+            } else {
+                None
+            }
         };
         refuse_if_secrets_without_recipients_inner(&config, lookup).unwrap();
     }
@@ -1110,7 +1124,11 @@ type = "test.with_secret"
         .unwrap();
         let schema = schema_with_secret();
         let lookup = |name: &str| {
-            if name == "test.with_secret" { Some(&schema) } else { None }
+            if name == "test.with_secret" {
+                Some(&schema)
+            } else {
+                None
+            }
         };
         let err = refuse_if_secrets_without_recipients_inner(&config, lookup).unwrap_err();
         assert!(err.contains("with_secret"), "got: {err}");
