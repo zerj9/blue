@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -19,20 +19,27 @@ impl Graph {
     /// Build from config + state — used by plan.
     pub fn from_config_and_state(config: &ResourceConfig, state: &State) -> Result<Self, String> {
         let mut graph = Self::empty();
+        let mut config_nodes = HashSet::new();
 
         // Add parameter nodes
         for name in config.parameters.keys() {
-            graph.add_node(&format!("parameters.{name}"));
+            let node_key = format!("parameters.{name}");
+            graph.add_node(&node_key);
+            config_nodes.insert(node_key);
         }
 
         // Add data source nodes
         for name in config.data.keys() {
-            graph.add_node(&format!("data.{name}"));
+            let node_key = format!("data.{name}");
+            graph.add_node(&node_key);
+            config_nodes.insert(node_key);
         }
 
         // Add resource nodes from config
         for name in config.resources.keys() {
-            graph.add_node(&format!("resources.{name}"));
+            let node_key = format!("resources.{name}");
+            graph.add_node(&node_key);
+            config_nodes.insert(node_key);
         }
 
         // Add deletion nodes — resources in state but not in config
@@ -46,7 +53,7 @@ impl Graph {
         for (name, ds) in &config.data {
             let node_key = format!("data.{name}");
             for v in ds.config.values() {
-                graph.add_edges_from_value(&node_key, v)?;
+                graph.add_edges_from_value(&node_key, v, &config_nodes)?;
             }
         }
 
@@ -54,7 +61,7 @@ impl Graph {
         for (name, res) in &config.resources {
             let node_key = format!("resources.{name}");
             for v in res.config.values() {
-                graph.add_edges_from_value(&node_key, v)?;
+                graph.add_edges_from_value(&node_key, v, &config_nodes)?;
             }
         }
 
@@ -66,7 +73,7 @@ impl Graph {
             let node_key = format!("resources.{name}");
             for dep in &res_state.depends_on {
                 if graph.node_indices.contains_key(dep) {
-                    graph.add_edge(dep, &node_key)?;
+                    graph.add_edge(&node_key, dep)?;
                 }
                 // ignore edges to nodes that don't exist — dependency is already gone
             }
@@ -191,12 +198,17 @@ impl Graph {
         Ok(())
     }
 
-    fn add_edges_from_value(&mut self, node_key: &str, value: &Value) -> Result<(), String> {
+    fn add_edges_from_value(
+        &mut self,
+        node_key: &str,
+        value: &Value,
+        allowed_refs: &HashSet<String>,
+    ) -> Result<(), String> {
         match value {
             Value::String(s) => {
                 for r in extract_refs(s)? {
                     let dep_key = r.dependency_key();
-                    if !self.node_indices.contains_key(&dep_key) {
+                    if !allowed_refs.contains(&dep_key) {
                         return Err(format!(
                             "Ref '{{{{ {dep_key} }}}}' in '{node_key}' points to unknown node"
                         ));
@@ -206,12 +218,12 @@ impl Graph {
             }
             Value::Object(map) => {
                 for v in map.values() {
-                    self.add_edges_from_value(node_key, v)?;
+                    self.add_edges_from_value(node_key, v, allowed_refs)?;
                 }
             }
             Value::Array(arr) => {
                 for v in arr {
-                    self.add_edges_from_value(node_key, v)?;
+                    self.add_edges_from_value(node_key, v, allowed_refs)?;
                 }
             }
             _ => {}
@@ -292,6 +304,67 @@ hostname = "web-01"
     }
 
     #[test]
+    fn config_resource_cannot_reference_state_only_deletion_node() {
+        let config = parse_resource_config(
+            r#"
+[resources.new-server]
+type = "upcloud.server"
+storage = "{{ resources.old-server.uuid }}"
+"#,
+        )
+        .unwrap();
+
+        let mut state = empty_state();
+        state.resources.insert(
+            "old-server".to_string(),
+            ResourceState {
+                resource_type: "upcloud.server".to_string(),
+                inputs: json!({}),
+                outputs: json!({"uuid": "old-uuid"}),
+                depends_on: vec![],
+            },
+        );
+
+        let result = Graph::from_config_and_state(&config, &state);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown node"));
+    }
+
+    #[test]
+    fn deletion_nodes_are_ordered_before_their_dependencies() {
+        let config = parse_resource_config("").unwrap();
+
+        let mut state = empty_state();
+        state.resources.insert(
+            "server".to_string(),
+            ResourceState {
+                resource_type: "upcloud.server".to_string(),
+                inputs: json!({}),
+                outputs: json!({}),
+                depends_on: vec![],
+            },
+        );
+        state.resources.insert(
+            "firewall".to_string(),
+            ResourceState {
+                resource_type: "upcloud.firewall".to_string(),
+                inputs: json!({}),
+                outputs: json!({}),
+                depends_on: vec!["resources.server".to_string()],
+            },
+        );
+
+        let graph = Graph::from_config_and_state(&config, &state).unwrap();
+        let order = graph.topological_order();
+        let server_pos = order.iter().position(|n| *n == "resources.server").unwrap();
+        let fw_pos = order
+            .iter()
+            .position(|n| *n == "resources.firewall")
+            .unwrap();
+        assert!(fw_pos < server_pos);
+    }
+
+    #[test]
     fn data_source_depends_on_resource_fails() {
         let config = parse_resource_config(
             r#"
@@ -308,11 +381,9 @@ filters = { uuid = "{{ resources.web-01.uuid }}" }
 
         let result = Graph::from_config_and_state(&config, &empty_state());
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("data sources may only depend on parameters")
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("data sources may only depend on parameters"));
     }
 
     #[test]
